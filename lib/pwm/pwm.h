@@ -16,7 +16,7 @@ public:
     }
 
     void writePercent(uint8_t percent) {
-        Serial.printf("Duty Cycle percentage %u%%\n", percent);
+        //Serial.printf("Duty Cycle percentage %u%%\n", percent);
         percent = min(percent, static_cast<uint8_t>(100));
         writeDuty((maxDuty_ * percent) / 100);
     }
