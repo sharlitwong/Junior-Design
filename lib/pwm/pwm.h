@@ -1,6 +1,6 @@
 class Pwm {
-public:
-    Pwm(uint8_t pin, uint8_t channel, uint32_t frequency = 500, uint8_t resolution = 8)
+public: // 5V
+    Pwm(uint8_t pin, uint8_t channel, uint32_t frequency = 100, uint8_t resolution = 8)
         : pin_(pin), channel_(channel), frequency_(frequency), resolution_(resolution),
           maxDuty_((1UL << resolution) - 1) {}
 
@@ -12,11 +12,12 @@ public:
 
     void writeDuty(uint32_t duty) {
         duty = min(duty, maxDuty_);
+        Serial.printf("Duty Cycle %u%%\n", duty);
         ledcWrite(channel_, duty);   // channel, not pin
     }
 
     void writePercent(uint8_t percent) {
-        //Serial.printf("Duty Cycle percentage %u%%\n", percent);
+        Serial.printf("Duty Cycle percentage %u%%\n", percent);
         percent = min(percent, static_cast<uint8_t>(100));
         writeDuty((maxDuty_ * percent) / 100);
     }

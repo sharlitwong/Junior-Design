@@ -207,8 +207,8 @@ void loop() {
 
     //Motor 1 direction
     //Serial.println("Set direction for Motor 1");
-    digitalWrite(MOTOR_1_DIR1, HIGH);
-    digitalWrite(MOTOR_1_DIR2, LOW);
+    digitalWrite(MOTOR_1_DIR1, LOW);
+    digitalWrite(MOTOR_1_DIR2, HIGH);
 
     //Motor 2 direction
     //Serial.println("Set direction for Motor 2");
@@ -216,7 +216,24 @@ void loop() {
     digitalWrite(MOTOR_2_DIR2, HIGH);
 
     //Serial.println("Writing PWM duty cycles");
+    motor1_pwm.writePercent(1);
+    delay(5000);
+    motor1_pwm.writePercent(0);
+    delay(5000);
+    motor1_pwm.writePercent(10);
+    delay(5000);
+    motor1_pwm.writePercent(0);
+    delay(5000);
+    motor1_pwm.writePercent(50);
+    delay(5000);
+    motor1_pwm.writePercent(0);
+    delay(5000);
+    motor1_pwm.writePercent(75);
+    delay(5000);
+    motor1_pwm.writePercent(0);
+    delay(5000);
     motor1_pwm.writePercent(100);
+    delay(5000);
     motor2_pwm.writePercent(50);
 
     //STATE MACHINE
