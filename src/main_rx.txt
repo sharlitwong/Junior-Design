@@ -5,9 +5,8 @@ FOR RECEIVING WEBSOCKET STATES
 */
 #include <Adafruit_NeoPixel.h>
 #include <pwm.h>
-#include <WiFi.h>
-#include <WebSocketsClient.h>
 #include <esp32_secrets.h>
+#include <websocket.h>
 
 #define TEAM_TAG "BLUESCLUES:"
 
@@ -35,9 +34,6 @@ const char* WIFI_PASSWORD = SECRET_PASS;
 const char* CLIENT_ID = "BLUZ12CLUZ34"; //esp32 with breadboard
 // const char* CLIENT_ID = "BLUESCLUES12"; //esp without breadboard
 
-WebSocketsClient webSocket;
-
-bool authenticated = false;
 unsigned long lastSendTime = 0;
 
 enum State {
@@ -53,44 +49,20 @@ enum State {
 
 State currentState = STATE_1;
 
-void webSocketEvent(
-  WStype_t type,
-  uint8_t* payload,
-  size_t length
-) {
-    //why do we use switch instead of elifs?
-    //
-  switch (type) {
-    case WStype_CONNECTED:
-      Serial.println("Connected to WebSocket server");
+Websocket webSocket(
+    WIFI_SSID,
+    WIFI_PASSWORD,
+    SERVER_IP,
+    SERVER_PORT,
+    SERVER_PATH,
+    CLIENT_ID
+);
 
-      // First message must be an approved ID!
-      webSocket.sendTXT(CLIENT_ID);
-      break;
+void onWebSocketMessage(const String& message) {
+    Serial.print("Received: ");
+    Serial.print(message);
 
-    case WStype_TEXT: {
-      String message;
-
-      for (size_t i = 0; i < length; i++) {
-        message += (char)payload[i];
-      }
-
-      Serial.print("Received: ");
-      Serial.print(message);
-      // int selectedStateNum = static_cast<int>((char)message[0]);
-
-      if (message.indexOf("\"authenticated\"") >= 0 &&
-          message.indexOf("\"ok\"") >= 0) {
-        authenticated = true;
-        Serial.println("Client authenticated");
-      }
-
-      if (message.indexOf("\"error\"") >= 0) {
-        authenticated = false;
-        Serial.println("Authentication failed");
-      }
-
-      if(authenticated) {
+    if(webSocket.isAuthenticated()) {
         String echo = "\"echo\":\""; // "echo:":"
         int echo_ind = message.indexOf(echo); //where "echo":" starts in message
 
@@ -111,24 +83,7 @@ void webSocketEvent(
             }
           }
         }
-      }
-
-      break;
     }
-
-    case WStype_DISCONNECTED:
-      authenticated = false;
-      Serial.println("got here");
-      Serial.println("Disconnected");
-      break;
-
-    case WStype_ERROR:
-      Serial.println("WebSocket error");
-      break;
-
-    default:
-      break;
-  }
 }
 
 void IRAM_ATTR handleButtonISR() { //Interrupt Service Routine for pushbutton
@@ -146,25 +101,8 @@ Adafruit_NeoPixel rgb(NUM_LEDS, LED, NEO_GRB + NEO_KHZ800);
 
 void setup() {
     Serial.begin(115200);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-
-    Serial.println();
-    Serial.println("Wi-Fi connected");
-
-    webSocket.begin(
-        SERVER_IP,
-        SERVER_PORT,
-        SERVER_PATH
-    );
-
-    webSocket.onEvent(webSocketEvent);
-    webSocket.setReconnectInterval(5000);
-    webSocket.enableHeartbeat(15000, 3000, 2);
+    webSocket.onMessage(onWebSocketMessage);
+    webSocket.begin();
 
     delay(1000);
 
@@ -173,14 +111,12 @@ void setup() {
     pinMode(MOTOR_1_DIR2, OUTPUT);
     pinMode(MOTOR_2_DIR1, OUTPUT);
     pinMode(MOTOR_2_DIR2, OUTPUT);
+    motor1_pwm.begin();
+    motor2_pwm.begin();
 
     //BUTTON PIN (for arduino state machine)
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleButtonISR, FALLING); //GPIO pin, ISR, event
-
-    motor1_pwm.begin();
-    motor2_pwm.begin();
-
     rgb.begin();
 }
 

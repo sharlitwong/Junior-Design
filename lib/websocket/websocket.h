@@ -37,6 +37,8 @@ public:
 
     void loop() { client_.loop(); }
 
+    void onMessage(void (*callback)(const String&)) { messageCallback_ = callback; }
+
     bool isAuthenticated() const { return authenticated_; }
 
     bool sendText(const String& message) {
@@ -90,6 +92,8 @@ private:
             authenticated_ = false;
             Serial.println("Authentication failed");
         }
+
+        if (messageCallback_ != nullptr) messageCallback_(message);
     }
 
     const char* wifiSsid_;
@@ -100,4 +104,5 @@ private:
     const char* clientId_;
     WebSocketsClient client_;
     bool authenticated_ = false;
+    void (*messageCallback_)(const String&) = nullptr;
 };
