@@ -1,6 +1,6 @@
 class Pwm {
 public: // 5V
-    Pwm(uint8_t pin, uint8_t channel, uint32_t frequency = 100, uint8_t resolution = 8)
+    Pwm(uint8_t pin, uint8_t channel, uint32_t frequency = 300, uint8_t resolution = 8)
         : pin_(pin), channel_(channel), frequency_(frequency), resolution_(resolution),
           maxDuty_((1UL << resolution) - 1) {}
 

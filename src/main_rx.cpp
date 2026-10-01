@@ -216,25 +216,25 @@ void loop() {
     digitalWrite(MOTOR_2_DIR2, HIGH);
 
     //Serial.println("Writing PWM duty cycles");
-    motor1_pwm.writePercent(1);
-    delay(5000);
+    // motor1_pwm.writePercent(1);
+    // delay(5000);
     motor1_pwm.writePercent(0);
-    delay(5000);
-    motor1_pwm.writePercent(10);
-    delay(5000);
-    motor1_pwm.writePercent(0);
-    delay(5000);
-    motor1_pwm.writePercent(50);
-    delay(5000);
-    motor1_pwm.writePercent(0);
-    delay(5000);
-    motor1_pwm.writePercent(75);
-    delay(5000);
-    motor1_pwm.writePercent(0);
-    delay(5000);
-    motor1_pwm.writePercent(100);
-    delay(5000);
-    motor2_pwm.writePercent(50);
+    // delay(5000);
+    // motor1_pwm.writePercent(10);
+    // delay(5000);
+    // motor1_pwm.writePercent(0);
+    // delay(5000);
+    // motor1_pwm.writePercent(50);
+    // delay(5000);
+    // motor1_pwm.writePercent(0);
+    // delay(5000);
+    // motor1_pwm.writePercent(75);
+    // delay(5000);
+    // motor1_pwm.writePercent(0);
+    // delay(5000);
+    // motor1_pwm.writePercent(100);
+    // delay(5000);
+    // motor2_pwm.writePercent(50);
 
     //STATE MACHINE
 
