@@ -5,9 +5,8 @@
 */
 #include <Adafruit_NeoPixel.h>
 #include <pwm.h>
-#include <WiFi.h>
-#include <WebSocketsClient.h>
 #include <esp32_secrets.h>
+#include <websocket.h>
 
 #define TEAM_TAG "BLUESCLUES:"
 
@@ -34,9 +33,6 @@ const char* WIFI_PASSWORD = SECRET_PASS;
 
 const char* CLIENT_ID = "BLUESCLUES12"; //esp without breadboard
 
-WebSocketsClient webSocket;
-
-bool authenticated = false;
 unsigned long lastSendTime = 0;
 
 enum State {
@@ -50,57 +46,14 @@ enum State {
     NUM_STATES
 };
 
-void webSocketEvent(
-  WStype_t type,
-  uint8_t* payload,
-  size_t length
-) {
-    //why do we use switch instead of elifs?
-    //
-  switch (type) {
-    case WStype_CONNECTED:
-      Serial.println("Connected to WebSocket server");
-
-      // First message must be an approved ID!
-      webSocket.sendTXT(CLIENT_ID);
-      break;
-
-    case WStype_TEXT: {
-      String message;
-
-      for (size_t i = 0; i < length; i++) {
-        message += (char)payload[i];
-      }
-
-      Serial.print("Received: ");
-
-      if (message.indexOf("\"authenticated\"") >= 0 &&
-          message.indexOf("\"ok\"") >= 0) {
-        authenticated = true;
-        Serial.println("Client authenticated");
-      }
-
-      if (message.indexOf("\"error\"") >= 0) {
-        authenticated = false;
-        Serial.println("Authentication failed");
-      }
-      break;
-    }
-
-    case WStype_DISCONNECTED:
-      authenticated = false;
-      Serial.println("got here");
-      Serial.println("Disconnected");
-      break;
-
-    case WStype_ERROR:
-      Serial.println("WebSocket error");
-      break;
-
-    default:
-      break;
-  }
-}
+Websocket webSocket(
+    WIFI_SSID,
+    WIFI_PASSWORD,
+    SERVER_IP,
+    SERVER_PORT,
+    SERVER_PATH,
+    CLIENT_ID
+);
 
 void IRAM_ATTR handleButtonISR() { //Interrupt Service Routine for pushbutton
   unsigned long now = millis();
@@ -119,25 +72,7 @@ Adafruit_NeoPixel rgb(NUM_LEDS, LED, NEO_GRB + NEO_KHZ800);
 
 void setup() {
     Serial.begin(115200);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-
-    Serial.println();
-    Serial.println("Wi-Fi connected");
-
-    webSocket.begin(
-        SERVER_IP,
-        SERVER_PORT,
-        SERVER_PATH
-    );
-
-    webSocket.onEvent(webSocketEvent);
-    webSocket.setReconnectInterval(5000);
-    webSocket.enableHeartbeat(15000, 3000, 2);
+    webSocket.begin();
 
     delay(1000);
 
@@ -162,15 +97,13 @@ void loop() {
     webSocket.loop();
 
 
-    if (authenticated &&
+    if (webSocket.isAuthenticated() &&
       millis() - lastSendTime >= 5000) { //checks if it has been 5 secs
         lastSendTime = millis();
         // what do you want to send?
         // state > 7 ? state = 1 : state++;
         String myMessage = String(TEAM_TAG) + "1";
-        webSocket.sendTXT(
-        myMessage
-        );
+        webSocket.sendText(myMessage);
     }
 
     if (buttonPressed) {
