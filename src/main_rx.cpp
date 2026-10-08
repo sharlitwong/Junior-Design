@@ -4,9 +4,10 @@
 FOR RECEIVING WEBSOCKET STATES
 */
 #include <Adafruit_NeoPixel.h>
-#include <pwm.h>
+// #include <pwm.h>
 #include <esp32_secrets.h>
 #include <websocket.h>
+#include <motor.h>
 
 #define TEAM_TAG "BLUESCLUES:"
 
@@ -96,6 +97,7 @@ void IRAM_ATTR handleButtonISR() { //Interrupt Service Routine for pushbutton
 
 Pwm motor1_pwm(MOTOR_1_PWM, 0);   // channel 0
 Pwm motor2_pwm(MOTOR_2_PWM, 1);   // channel 1
+Motor motors(motor1_pwm, motor2_pwm);
 
 Adafruit_NeoPixel rgb(NUM_LEDS, LED, NEO_GRB + NEO_KHZ800);
 
@@ -113,6 +115,8 @@ void setup() {
     pinMode(MOTOR_2_DIR2, OUTPUT);
     motor1_pwm.begin();
     motor2_pwm.begin();
+
+    motors.begin();
 
     //BUTTON PIN (for arduino state machine)
     pinMode(BUTTON_PIN, INPUT_PULLUP);
@@ -141,38 +145,31 @@ void loop() {
         currentState = static_cast<State>((currentState + 1) % NUM_STATES);
     }
 
-    //Motor 1 direction
-    //Serial.println("Set direction for Motor 1");
-    digitalWrite(MOTOR_1_DIR1, LOW);
-    digitalWrite(MOTOR_1_DIR2, HIGH);
+    // //Motor 1 direction
+    // //Serial.println("Set direction for Motor 1");
+    // digitalWrite(MOTOR_1_DIR1, LOW);
+    // digitalWrite(MOTOR_1_DIR2, HIGH);
 
-    //Motor 2 direction
-    //Serial.println("Set direction for Motor 2");
-    digitalWrite(MOTOR_2_DIR1, LOW);
-    digitalWrite(MOTOR_2_DIR2, HIGH);
-
-    //Serial.println("Writing PWM duty cycles");
-    // motor1_pwm.writePercent(1);
-    // delay(5000);
-    motor1_pwm.writePercent(0);
-    // delay(5000);
-    // motor1_pwm.writePercent(10);
-    // delay(5000);
+    // //Motor 2 direction
+    // //Serial.println("Set direction for Motor 2");
+    // digitalWrite(MOTOR_2_DIR1, LOW);
+    // digitalWrite(MOTOR_2_DIR2, HIGH);
     // motor1_pwm.writePercent(0);
-    // delay(5000);
-    // motor1_pwm.writePercent(50);
-    // delay(5000);
-    // motor1_pwm.writePercent(0);
-    // delay(5000);
-    // motor1_pwm.writePercent(75);
-    // delay(5000);
-    // motor1_pwm.writePercent(0);
-    // delay(5000);
-    // motor1_pwm.writePercent(100);
-    // delay(5000);
-    // motor2_pwm.writePercent(50);
 
     //STATE MACHINE
+    // Serial.println("MOVING FORWARD");
+    // motors.moveForward(100);
+    // delay(1000);
+    // Serial.println("MOVING BACKWARD");
+    // motors.moveBackward(100);
+    // delay(4000);
+
+    // Serial.println("PIVOTING RIGHT");
+    // motors.pivotCW(100);
+    // delay(4000);
+    // Serial.println("PIVOTING LEFT");
+    // motors.pivotCCW(100);
+    // delay(4000);
 
     static State lastPrinted = NUM_STATES;   // impossible value, so the first pass prints
     if (currentState != lastPrinted) {
@@ -183,29 +180,33 @@ void loop() {
 
     switch (currentState) {
     case STATE_1:
-        // e.g. red
+        // e.g. red FORWARD
         // Serial.println("State 1");
+        motors.moveForward(100);
         rgb.setPixelColor(0, rgb.Color(150, 0, 0));
         rgb.show();
         break;
 
     case STATE_2:
-        // e.g. orange
+        // e.g. orange BACKWARD
         // Serial.println("State 2");
+        motors.moveBackward(100);
         rgb.setPixelColor(0, rgb.Color(255, 60, 0));
         rgb.show();
         break;
 
     case STATE_3:
-        // e.g. yellow
+        // e.g. yellow PIVOT CW
         // Serial.println("State 3");
+        motors.pivotCW(100);
         rgb.setPixelColor(0, rgb.Color(150, 60, 0));
         rgb.show();
         break;
 
     case STATE_4:
-        // e.g. green
+        // e.g. green PIVOT CCW
         // Serial.println("State 4");
+        motors.pivotCCW(100);
         rgb.setPixelColor(0, rgb.Color(0, 150, 0));
         rgb.show();
         break;
@@ -214,6 +215,7 @@ void loop() {
         // e.g. blue
         // Serial.println("State 5");
         rgb.setPixelColor(0, rgb.Color(0, 0, 150));
+        motors.stop();
         rgb.show();
         break;
 
