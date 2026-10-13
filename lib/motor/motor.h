@@ -31,24 +31,24 @@ public:
         right_motor.writePercent(0);
     }
     
-    void moveForward(int speed) {
+    void moveForward(int leftSpeed, int rightSpeed) {
         if (!leftMotorForward || !rightMotorForward) {
             leftMotorForward = true;
             rightMotorForward = true;
             this->switchDirection();
         }
-        left_motor.writePercent(speed);
-        right_motor.writePercent(speed);
+        left_motor.writePercent(leftSpeed);
+        right_motor.writePercent(rightSpeed);
     }
 
-    void moveBackward(int speed){
+    void moveBackward(int leftSpeed, int rightSpeed){
         if (leftMotorForward || rightMotorForward) {
             leftMotorForward = false;
             rightMotorForward = false;
             this->switchDirection();
         }
-        left_motor.writePercent(speed);
-        right_motor.writePercent(speed);
+        left_motor.writePercent(leftSpeed);
+        right_motor.writePercent(rightSpeed);
     }
     
     void turn(int speedLeft, int speedRight) {

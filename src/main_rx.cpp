@@ -38,17 +38,17 @@ const char* CLIENT_ID = "BLUZ12CLUZ34"; //esp32 with breadboard
 unsigned long lastSendTime = 0;
 
 enum State {
-    STATE_1,
-    STATE_2,
-    STATE_3,
-    STATE_4,
-    STATE_5,
-    STATE_6,
-    STATE_7,
+    FORWARD,
+    BACKWARD,
+    PIVOTCW,
+    PIVOTCCW,
+    STOP,
+    TURN_RIGHT,
+    TURN_LEFT,
     NUM_STATES
 };
 
-State currentState = STATE_1;
+State currentState = FORWARD;
 
 Websocket webSocket(
     WIFI_SSID,
@@ -179,23 +179,23 @@ void loop() {
     }
 
     switch (currentState) {
-    case STATE_1:
+    case FORWARD:
         // e.g. red FORWARD
         // Serial.println("State 1");
-        motors.moveForward(100);
+        motors.moveForward(100, 100);
         rgb.setPixelColor(0, rgb.Color(150, 0, 0));
         rgb.show();
         break;
 
-    case STATE_2:
+    case BACKWARD:
         // e.g. orange BACKWARD
         // Serial.println("State 2");
-        motors.moveBackward(100);
+        motors.moveBackward(100, 100);
         rgb.setPixelColor(0, rgb.Color(255, 60, 0));
         rgb.show();
         break;
 
-    case STATE_3:
+    case PIVOTCW:
         // e.g. yellow PIVOT CW
         // Serial.println("State 3");
         motors.pivotCW(100);
@@ -203,7 +203,7 @@ void loop() {
         rgb.show();
         break;
 
-    case STATE_4:
+    case PIVOTCCW:
         // e.g. green PIVOT CCW
         // Serial.println("State 4");
         motors.pivotCCW(100);
@@ -211,24 +211,26 @@ void loop() {
         rgb.show();
         break;
 
-    case STATE_5:
-        // e.g. blue
+    case STOP:
+        // e.g. blue STOP 
         // Serial.println("State 5");
         rgb.setPixelColor(0, rgb.Color(0, 0, 150));
         motors.stop();
         rgb.show();
         break;
 
-    case STATE_6:
-        // e.g. purple
+    case TURN_LEFT:
+        // e.g. purple TURN LEFT
         // Serial.println("State 6");
+        motors.moveForward(50, 100);
         rgb.setPixelColor(0, rgb.Color(100, 0, 150));
         rgb.show();
         break;
 
-    case STATE_7:
-        // e.g. purple
+    case TURN_RIGHT:
+        // e.g. purple TURN RIGHT 
         // Serial.println("State 7");
+        motors.moveForward(100, 50);
         rgb.setPixelColor(0, rgb.Color(150, 150, 150));
         rgb.show();
         break;

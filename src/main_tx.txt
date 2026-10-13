@@ -31,6 +31,8 @@
 #define RIGHT_COMMAND '3'
 #define LEFT_COMMAND  '4'
 #define STOP_COMMAND  '5'
+#define TURN_RIGHT_COMMAND '6'
+#define TURN_LEFT_COMMAND '7'
 
 volatile char pendingCommand = 0;  // 0 = nothing to send, set by the ISRs
 volatile unsigned long lastInterruptTime = 0;
@@ -47,13 +49,13 @@ const char* CLIENT_ID = "BLUESCLUES12"; //esp without breadboard
 unsigned long lastSendTime = 0;
 
 enum State {
-    STATE_1,
-    STATE_2,
-    STATE_3,
-    STATE_4,
-    STATE_5,
-    STATE_6,
-    STATE_7,
+    FORWARD,
+    BACKWARD,
+    PIVOTCW,
+    PIVOTCCW,
+    STOP,
+    TURN_RIGHT,
+    TURN_LEFT,
     NUM_STATES
 };
 
@@ -82,16 +84,16 @@ void IRAM_ATTR handleDownISR()  {
     queueCommand(DOWN_COMMAND); 
 }
 void IRAM_ATTR handleRightISR() { 
-    queueCommand(RIGHT_COMMAND); 
+    queueCommand(TURN_RIGHT_COMMAND); 
 }
 void IRAM_ATTR handleLeftISR()  { 
-    queueCommand(LEFT_COMMAND); 
+    queueCommand(TURN_LEFT_COMMAND); 
 }
 void IRAM_ATTR handleStopISR()  { 
     queueCommand(STOP_COMMAND); 
 }
 
-State currentState = STATE_1;
+State currentState = FORWARD;
 
 void setup() {
     Serial.begin(115200);
