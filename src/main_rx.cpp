@@ -22,6 +22,10 @@ FOR RECEIVING WEBSOCKET STATES
 
 #define BUTTON_PIN     42
 
+#define DAC_PIN 9
+#define LED_EN  10
+#define CMP_IN  11
+
 volatile bool buttonPressed = false;
 volatile unsigned long lastInterruptTime = 0;
 
