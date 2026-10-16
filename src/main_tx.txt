@@ -25,11 +25,14 @@
 #define LEFT_BUTTON   1
 #define STOP_BUTTON   40
 
+#define CW_BUTTON     4
+#define CCW_BUTTON    5
+
 // digit sent after TEAM_TAG for each button (RX accepts '1'-'7')
 #define UP_COMMAND    '1'
 #define DOWN_COMMAND  '2'
-#define RIGHT_COMMAND '3'
-#define LEFT_COMMAND  '4'
+#define CW_COMMAND    '3'
+#define CCW_COMMAND   '4'
 #define STOP_COMMAND  '5'
 #define TURN_RIGHT_COMMAND '6'
 #define TURN_LEFT_COMMAND '7'
@@ -92,6 +95,12 @@ void IRAM_ATTR handleLeftISR()  {
 void IRAM_ATTR handleStopISR()  { 
     queueCommand(STOP_COMMAND); 
 }
+void IRAM_ATTR handleCWISR()  { 
+    queueCommand(CW_COMMAND); 
+}
+void IRAM_ATTR handleCCWISR()  { 
+    queueCommand(CCW_COMMAND); 
+}
 
 State currentState = FORWARD;
 
@@ -113,12 +122,16 @@ void setup() {
     pinMode(RIGHT_BUTTON, INPUT_PULLUP);
     pinMode(LEFT_BUTTON, INPUT_PULLUP);
     pinMode(STOP_BUTTON, INPUT_PULLUP);
+    pinMode(CW_BUTTON, INPUT_PULLUP);
+    pinMode(CCW_BUTTON, INPUT_PULLUP);
 
     attachInterrupt(digitalPinToInterrupt(UP_BUTTON), handleUpISR, FALLING); //GPIO pin, ISR, event
     attachInterrupt(digitalPinToInterrupt(DOWN_BUTTON), handleDownISR, FALLING); //GPIO pin, ISR, event
     attachInterrupt(digitalPinToInterrupt(RIGHT_BUTTON), handleRightISR, FALLING); //GPIO pin, ISR, event
     attachInterrupt(digitalPinToInterrupt(LEFT_BUTTON), handleLeftISR, FALLING); //GPIO pin, ISR, event
     attachInterrupt(digitalPinToInterrupt(STOP_BUTTON), handleStopISR, FALLING);
+    attachInterrupt(digitalPinToInterrupt(CW_BUTTON), handleCWISR, FALLING);
+    attachInterrupt(digitalPinToInterrupt(CCW_BUTTON), handleCCWISR, FALLING);
 }
 
 void loop() {

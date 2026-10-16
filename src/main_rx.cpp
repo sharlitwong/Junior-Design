@@ -8,6 +8,19 @@ FOR RECEIVING WEBSOCKET STATES
 #include <esp32_secrets.h>
 #include <websocket.h>
 #include <motor.h>
+#include <encoder.h>
+#include <drive.h>
+#include <distance.h>
+const bool TIMED_TEST = false;   // true = run the timed encoder test, false = normal remote control
+Encoder rightEnc(17, 18, true);   // right wheel, flipped so forward counts up
+Encoder leftEnc(40, 39);          // left wheel
+
+// fixed-radius turn settings
+const float TRACK_WIDTH = 16.0;   // cm, between wheel centres (update when the chassis changes)
+const float TURN_RADIUS = 10.0;   // cm, measured to the middle of the bot
+const int TURN_SPEED = 2000;      // outer wheel speed, counts/s (sets how fast the turn happens)
+const int TURN_INNER = TURN_SPEED * (TURN_RADIUS - TRACK_WIDTH / 2) / (TURN_RADIUS + TRACK_WIDTH / 2);
+
 
 #define TEAM_TAG "BLUESCLUES:"
 
@@ -22,9 +35,8 @@ FOR RECEIVING WEBSOCKET STATES
 
 #define BUTTON_PIN     42
 
-#define DAC_PIN 9
-#define LED_EN  10
-#define CMP_IN  11
+#define ADC_PIN 9
+#define LED_EN  46
 
 volatile bool buttonPressed = false;
 volatile unsigned long lastInterruptTime = 0;
@@ -36,8 +48,7 @@ const char* SERVER_PATH = "/ws";
 const char* WIFI_SSID = SECRET_SSID;
 const char* WIFI_PASSWORD = SECRET_PASS;
 
-const char* CLIENT_ID = "BLUZ12CLUZ34"; //esp32 with breadboard
-// const char* CLIENT_ID = "BLUESCLUES12"; //esp without breadboard
+const char* CLIENT_ID = "BLUZ12CLUZ34"; //receiver ID
 
 unsigned long lastSendTime = 0;
 
@@ -52,7 +63,9 @@ enum State {
     NUM_STATES
 };
 
-State currentState = FORWARD;
+// State currentState = FORWARD;
+// State currentState = TIMED_TEST ? STOP : FORWARD;
+State currentState = STOP;
 
 Websocket webSocket(
     WIFI_SSID,
@@ -62,6 +75,8 @@ Websocket webSocket(
     SERVER_PATH,
     CLIENT_ID
 );
+
+Distance distance(ADC_PIN, LED_EN); 
 
 void onWebSocketMessage(const String& message) {
     Serial.print("Received: ");
@@ -102,13 +117,21 @@ void IRAM_ATTR handleButtonISR() { //Interrupt Service Routine for pushbutton
 Pwm motor1_pwm(MOTOR_1_PWM, 0);   // channel 0
 Pwm motor2_pwm(MOTOR_2_PWM, 1);   // channel 1
 Motor motors(motor1_pwm, motor2_pwm);
+Drive drive(motors, leftEnc, rightEnc);   
 
 Adafruit_NeoPixel rgb(NUM_LEDS, LED, NEO_GRB + NEO_KHZ800);
 
 void setup() {
+    distance.begin();
+    leftEnc.begin();
+    rightEnc.begin();
+
     Serial.begin(115200);
-    webSocket.onMessage(onWebSocketMessage);
-    webSocket.begin();
+    // setup(): replace the two webSocket lines
+    if (!TIMED_TEST) {
+        webSocket.onMessage(onWebSocketMessage);
+        webSocket.begin();
+    }
 
     delay(1000);
 
@@ -126,21 +149,18 @@ void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleButtonISR, FALLING); //GPIO pin, ISR, event
     rgb.begin();
+
+    // pinMode(LED_EN, OUTPUT);
+    // analogReadResolution(12);
+    // analogSetPinAttenuation(ADC_PIN, ADC_11db);
 }
-
+    
 void loop() {
-    //delay(1000);
-    webSocket.loop();
 
-    // if (authenticated &&
-    //   millis() - lastSendTime >= 5000) { //checks if it has been 5 secs
-    //     lastSendTime = millis();
-    //     // what do you want to send?
-    //     char* myMessage = "helloworld";
-    //     webSocket.sendTXT(
-    //     myMessage
-    //     );
-    // }
+    drive.update(); // every loop()
+    distance.update();
+
+    if (!TIMED_TEST) webSocket.loop();
 
     if (buttonPressed) {
         buttonPressed = false;
@@ -149,31 +169,26 @@ void loop() {
         currentState = static_cast<State>((currentState + 1) % NUM_STATES);
     }
 
-    // //Motor 1 direction
-    // //Serial.println("Set direction for Motor 1");
-    // digitalWrite(MOTOR_1_DIR1, LOW);
-    // digitalWrite(MOTOR_1_DIR2, HIGH);
+    if(distance.delta() > 0.350) {
+        currentState = STOP;
+    }
 
-    // //Motor 2 direction
-    // //Serial.println("Set direction for Motor 2");
-    // digitalWrite(MOTOR_2_DIR1, LOW);
-    // digitalWrite(MOTOR_2_DIR2, HIGH);
-    // motor1_pwm.writePercent(0);
+    // if (distance.update()) {
+    //     // A new reading is ready
+    //     Serial.printf("Distance delta: %.3f V\n", distance.delta());
+    // }
 
-    //STATE MACHINE
-    // Serial.println("MOVING FORWARD");
-    // motors.moveForward(100);
-    // delay(1000);
-    // Serial.println("MOVING BACKWARD");
-    // motors.moveBackward(100);
-    // delay(4000);
-
-    // Serial.println("PIVOTING RIGHT");
-    // motors.pivotCW(100);
-    // delay(4000);
-    // Serial.println("PIVOTING LEFT");
-    // motors.pivotCCW(100);
-    // delay(4000);
+    static unsigned long lastPrint = 0;
+    if (millis() - lastPrint >= 50) {   // print 20x per second, not thousands
+        lastPrint = millis();
+        //Serial.printf("A=%d B=%d\n", digitalRead(17), digitalRead(18));
+        // Serial.printf("A=%d B=%d\n", digitalRead(39), digitalRead(40));   // prints B's value under "A"
+        // Serial.printf("L=%ld R=%ld\n", (long)leftEnc.count(), (long)rightEnc.count());
+        // Serial.printf("L=%ld R=%ld  Lspd=%.0f Rspd=%.0f\n",
+        //               (long)leftEnc.count(), (long)rightEnc.count(),
+        //               drive.leftSpeed(), drive.rightSpeed());
+        Serial.printf("Distance recorded: %.3f\n", distance.delta());
+    }
 
     static State lastPrinted = NUM_STATES;   // impossible value, so the first pass prints
     if (currentState != lastPrinted) {
@@ -182,11 +197,32 @@ void loop() {
         Serial.println(currentState + 1);
     }
 
+    if (TIMED_TEST) {
+        static unsigned long testStart = millis();   // set on the first pass through loop()
+        static int phase = 0;                        // 0 = waiting, 1 = driving, 2 = coasting, 3 = done
+        unsigned long t = millis() - testStart;
+
+        if (phase == 0 && t >= 2000) {               // after 2 s: zero counts and go
+            leftEnc.reset();
+            rightEnc.reset();
+            currentState = FORWARD;
+            phase = 1;
+        } else if (phase == 1 && t >= 5000) {        // after 3 s of driving: stop
+            currentState = STOP;
+            phase = 2;
+        } else if (phase == 2 && t >= 6000) {        // after 1 s of coasting: report
+            long l = leftEnc.count();
+            long r = rightEnc.count();
+            Serial.printf("FINAL  L=%ld  R=%ld  R-L=%ld\n", l, r, r - l);
+            phase = 3;
+        }
+    }
+
     switch (currentState) {
     case FORWARD:
         // e.g. red FORWARD
         // Serial.println("State 1");
-        motors.moveForward(100, 100);
+        drive.setWheelSpeeds(1000, 1000);      // was motors.moveForward(100, 100)
         rgb.setPixelColor(0, rgb.Color(150, 0, 0));
         rgb.show();
         break;
@@ -194,7 +230,7 @@ void loop() {
     case BACKWARD:
         // e.g. orange BACKWARD
         // Serial.println("State 2");
-        motors.moveBackward(100, 100);
+        drive.setWheelSpeeds(-1000, -1000);    // was motors.moveBackward(100, 100)
         rgb.setPixelColor(0, rgb.Color(255, 60, 0));
         rgb.show();
         break;
@@ -202,7 +238,7 @@ void loop() {
     case PIVOTCW:
         // e.g. yellow PIVOT CW
         // Serial.println("State 3");
-        motors.pivotCW(100);
+        drive.setWheelSpeeds(800, -800);       // was motors.pivotCW(100)
         rgb.setPixelColor(0, rgb.Color(150, 60, 0));
         rgb.show();
         break;
@@ -210,7 +246,7 @@ void loop() {
     case PIVOTCCW:
         // e.g. green PIVOT CCW
         // Serial.println("State 4");
-        motors.pivotCCW(100);
+        drive.setWheelSpeeds(-800, 800);       // was motors.pivotCCW(100)
         rgb.setPixelColor(0, rgb.Color(0, 150, 0));
         rgb.show();
         break;
@@ -219,14 +255,14 @@ void loop() {
         // e.g. blue STOP 
         // Serial.println("State 5");
         rgb.setPixelColor(0, rgb.Color(0, 0, 150));
-        motors.stop();
+        drive.stop();
         rgb.show();
         break;
 
     case TURN_LEFT:
         // e.g. purple TURN LEFT
         // Serial.println("State 6");
-        motors.moveForward(50, 100);
+        drive.setWheelSpeeds(TURN_INNER, TURN_SPEED);   // left wheel on the inside of the curve
         rgb.setPixelColor(0, rgb.Color(100, 0, 150));
         rgb.show();
         break;
@@ -234,14 +270,18 @@ void loop() {
     case TURN_RIGHT:
         // e.g. purple TURN RIGHT 
         // Serial.println("State 7");
-        motors.moveForward(100, 50);
+        drive.setWheelSpeeds(TURN_SPEED, TURN_INNER);   // right wheel on the inside of the curve
         rgb.setPixelColor(0, rgb.Color(150, 150, 150));
         rgb.show();
         break;
 
     default:
-        // shouldn't happen, but good practice to handle it
+        // shouldn't happen
         break;
     }
+
+    // float v = analogReadMilliVolts(ADC_PIN);
+    // Serial.printf("V = %.3f\n", v);
+    // delay(100);
 }
 

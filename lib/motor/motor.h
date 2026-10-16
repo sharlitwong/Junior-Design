@@ -1,4 +1,4 @@
-// #pragma once
+#pragma once
 
 #include <pwm.h>
 // #include <Adafruit_NeoPixel.h>
@@ -72,6 +72,20 @@ public:
 
         left_motor.writePercent(speed);
         right_motor.writePercent(speed);
+    }
+
+    // signed duty cycle per wheel (in terms of percentage), -100..100 (%)
+    // negative = backward; postive = forward
+    void setDuty(int leftDuty, int rightDuty) {
+        leftDuty = constrain(leftDuty, -100, 100);
+        rightDuty = constrain(rightDuty, -100, 100);
+
+        leftMotorForward = leftDuty >= 0;
+        rightMotorForward = rightDuty >= 0;
+        this->switchDirection();
+
+        left_motor.writePercent(abs(leftDuty));
+        right_motor.writePercent(abs(rightDuty));
     }
     
 private:
