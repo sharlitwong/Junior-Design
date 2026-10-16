@@ -22,9 +22,8 @@ FOR RECEIVING WEBSOCKET STATES
 
 #define BUTTON_PIN     42
 
-#define DAC_PIN 9
-#define LED_EN  10
-#define CMP_IN  11
+#define ADC_PIN 9
+#define LED_EN  46
 
 volatile bool buttonPressed = false;
 volatile unsigned long lastInterruptTime = 0;
@@ -105,6 +104,28 @@ Motor motors(motor1_pwm, motor2_pwm);
 
 Adafruit_NeoPixel rgb(NUM_LEDS, LED, NEO_GRB + NEO_KHZ800);
 
+//CODE FOR DISTANCE SENSOR
+//Returns averaged input voltage in volts
+float readVoltage(int pin, int samples = 12) {
+    uint32_t sum = 0;
+    for (int i = 0; i < samples; i++) sum += analogReadMilliVolts(pin);
+    return sum / (float)samples / 1000.0f;
+}
+
+//Returns the difference between readings from when LED is on vs off, thus to cancel the ambient noise
+float readDeltaVolts() {
+  digitalWrite(LED_EN, LOW);  
+  delay(50);
+  float off = readVoltage(ADC_PIN);
+  // Serial.printf("V_off = %.3f\n", off);
+  digitalWrite(LED_EN, HIGH); 
+  delay(50);
+  float on = readVoltage(ADC_PIN);
+  // Serial.printf("V_on = %.3f\n", on);
+  digitalWrite(LED_EN, LOW);
+  return on - off;
+}
+
 void setup() {
     Serial.begin(115200);
     webSocket.onMessage(onWebSocketMessage);
@@ -126,10 +147,17 @@ void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleButtonISR, FALLING); //GPIO pin, ISR, event
     rgb.begin();
+
+    //DISTANCE SENSOR
+    pinMode(LED_EN, OUTPUT);
+    // pinMode(ADC_PIN, INPUT_PULLDOWN);
+    analogReadResolution(12);
+    analogSetPinAttenuation(ADC_PIN, ADC_0db);
 }
 
 void loop() {
     //delay(1000);
+
     webSocket.loop();
 
     // if (authenticated &&
@@ -243,5 +271,19 @@ void loop() {
         // shouldn't happen, but good practice to handle it
         break;
     }
+
+    //DISTANCE SENSOR
+    float voltage = readDeltaVolts();
+    
+    if (voltage >= 0.230 && voltage < 0.5) {
+      Serial.printf("WATCH OUT, YOU'RE GETTING CLOSER TO AN OBSTACLE!\n");
+    } else if (voltage >= 0.5 && voltage < 0.75) {
+      Serial.printf("TOO CLOSE, BETTER STOP THE CAR!\n");
+    } else if (voltage >= 0.75) {
+      Serial.printf("AT THIS POINT, YOU'RE COOKED!\n");
+    } else {
+      Serial.printf("V = %.3f\n", voltage);
+    }
+    delay(100);
 }
 
