@@ -11,19 +11,11 @@ FOR RECEIVING WEBSOCKET STATES
 #include <encoder.h>
 #include <drive.h>
 #include <distance.h>
-const bool TIMED_TEST = false;   // true = run the timed encoder test, false = normal remote control
-Encoder rightEnc(17, 18, true);   // right wheel, flipped so forward counts up
-Encoder leftEnc(40, 39);          // left wheel
-
-// fixed-radius turn settings
-const float TRACK_WIDTH = 16.0;   // cm, between wheel centres (update when the chassis changes)
-const float TURN_RADIUS = 10.0;   // cm, measured to the middle of the bot
-const int TURN_SPEED = 2000;      // outer wheel speed, counts/s (sets how fast the turn happens)
-const int TURN_INNER = TURN_SPEED * (TURN_RADIUS - TRACK_WIDTH / 2) / (TURN_RADIUS + TRACK_WIDTH / 2);
-
+#include <color.h>
 
 #define TEAM_TAG "BLUESCLUES:"
 
+//Define pin names and pin numbers
 #define MOTOR_1_PWM    1
 #define MOTOR_2_PWM    2
 #define MOTOR_1_DIR1   4
@@ -38,19 +30,25 @@ const int TURN_INNER = TURN_SPEED * (TURN_RADIUS - TRACK_WIDTH / 2) / (TURN_RADI
 #define ADC_PIN 9
 #define LED_EN  46
 
-volatile bool buttonPressed = false;
-volatile unsigned long lastInterruptTime = 0;
+#define BLINK1_ADC 10
+#define BLINK1_R 11
+#define BLINK1_G 12
+#define BLINK1_B 13
+
+const bool TIMED_TEST = false;   // true = run the timed encoder test, false = normal remote control
+
+// fixed-radius turn settings
+const float TRACK_WIDTH = 16.0;   // cm, between wheel centres (update when the chassis changes)
+const float TURN_RADIUS = 10.0;   // cm, measured to the middle of the bot
+const int TURN_SPEED = 2000;      // outer wheel speed, counts/s (sets how fast the turn happens)
+const int TURN_INNER = TURN_SPEED * (TURN_RADIUS - TRACK_WIDTH / 2) / (TURN_RADIUS + TRACK_WIDTH / 2);
 
 const char* SERVER_IP = "10.5.9.24";  // IP of server ESP32
 const uint16_t SERVER_PORT = 80;
 const char* SERVER_PATH = "/ws";
-
 const char* WIFI_SSID = SECRET_SSID;
 const char* WIFI_PASSWORD = SECRET_PASS;
-
 const char* CLIENT_ID = "BLUZ12CLUZ34"; //receiver ID
-
-unsigned long lastSendTime = 0;
 
 enum State {
     FORWARD,
@@ -63,9 +61,16 @@ enum State {
     NUM_STATES
 };
 
+volatile bool buttonPressed = false;
+volatile unsigned long lastInterruptTime = 0;
+unsigned long lastSendTime = 0;
+
 // State currentState = FORWARD;
 // State currentState = TIMED_TEST ? STOP : FORWARD;
 State currentState = STOP;
+
+Encoder rightEnc(17, 18, true);   // right wheel, flipped so forward counts up
+Encoder leftEnc(40, 39);          // left wheel
 
 Websocket webSocket(
     WIFI_SSID,
@@ -76,7 +81,14 @@ Websocket webSocket(
     CLIENT_ID
 );
 
+Pwm motor1_pwm(MOTOR_1_PWM, 0);   // channel 0
+Pwm motor2_pwm(MOTOR_2_PWM, 1);   // channel 1
+Motor motors(motor1_pwm, motor2_pwm);
+Drive drive(motors, leftEnc, rightEnc);   
+Adafruit_NeoPixel rgb(NUM_LEDS, LED, NEO_GRB + NEO_KHZ800);
 Distance distance(ADC_PIN, LED_EN); 
+ColorSensor color1(BLINK1_ADC, BLINK1_R, BLINK1_G, BLINK1_B); 
+ColorSensor::Surface surface;
 
 void onWebSocketMessage(const String& message) {
     Serial.print("Received: ");
@@ -114,15 +126,9 @@ void IRAM_ATTR handleButtonISR() { //Interrupt Service Routine for pushbutton
   }
 }
 
-Pwm motor1_pwm(MOTOR_1_PWM, 0);   // channel 0
-Pwm motor2_pwm(MOTOR_2_PWM, 1);   // channel 1
-Motor motors(motor1_pwm, motor2_pwm);
-Drive drive(motors, leftEnc, rightEnc);   
-
-Adafruit_NeoPixel rgb(NUM_LEDS, LED, NEO_GRB + NEO_KHZ800);
-
 void setup() {
     distance.begin();
+    color1.begin();
     leftEnc.begin();
     rightEnc.begin();
 
@@ -150,15 +156,31 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleButtonISR, FALLING); //GPIO pin, ISR, event
     rgb.begin();
 
-    // pinMode(LED_EN, OUTPUT);
+    color1.calibrateAll();
+    Serial.println("Calibration done");
+    color1.printCalibration(); 
+    // color1.saveCalibration();
+    
+    // color1.setCalibration(3.4103f, 20.0300f, 8.4800f, 0.0325f);
+    // while (!color1.loadCalibration()) {
+    //     Serial.println("No saved calibration, calibrating now");
+    //     color1.calibrateAll();
+    // } 
+
+    // if (color1.loadCalibration()) {
+    //     Serial.println("Loaded saved calibration");
+    //     color1.printCalibration();
+    // }
+    // pinMode(BLINK1_R, OUTPUT);
     // analogReadResolution(12);
-    // analogSetPinAttenuation(ADC_PIN, ADC_11db);
+    // analogSetPinAttenuation(BLINK1_ADC, ADC_11db);
 }
     
 void loop() {
-
     drive.update(); // every loop()
     distance.update();
+    color1.update();
+    // digitalWrite(BLINK1_R, HIGH);
 
     if (!TIMED_TEST) webSocket.loop();
 
@@ -178,6 +200,10 @@ void loop() {
     //     Serial.printf("Distance delta: %.3f V\n", distance.delta());
     // }
 
+    color1.printValues();
+    surface = color1.readSurface();
+    delay(200);
+
     static unsigned long lastPrint = 0;
     if (millis() - lastPrint >= 50) {   // print 20x per second, not thousands
         lastPrint = millis();
@@ -187,7 +213,7 @@ void loop() {
         // Serial.printf("L=%ld R=%ld  Lspd=%.0f Rspd=%.0f\n",
         //               (long)leftEnc.count(), (long)rightEnc.count(),
         //               drive.leftSpeed(), drive.rightSpeed());
-        Serial.printf("Distance recorded: %.3f\n", distance.delta());
+        // Serial.printf("Distance recorded: %.3f\n", distance.delta());
     }
 
     static State lastPrinted = NUM_STATES;   // impossible value, so the first pass prints
@@ -280,7 +306,7 @@ void loop() {
         break;
     }
 
-    // float v = analogReadMilliVolts(ADC_PIN);
+    // float v = analogReadMilliVolts(BLINK1_ADC);
     // Serial.printf("V = %.3f\n", v);
     // delay(100);
 }
