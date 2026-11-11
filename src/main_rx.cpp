@@ -11,8 +11,14 @@ FOR RECEIVING WEBSOCKET STATES
 #include <encoder.h>
 #include <drive.h>
 #include <distance.h>
+#include <battery.h>
+#include <Preferences.h>   // saves the learned motor speeds in flash across reboots
+// false = ignore the distance sensor (for testing movement while it isn't wired/aimed);
+// set back to true so the bot stops for obstacles
+const bool DISTANCE_STOP = false;
 const bool TIMED_TEST = false;   // true = run the timed encoder test, false = normal remote control
-Encoder rightEnc(17, 18, true);   // right wheel, flipped so forward counts up
+
+Encoder rightEnc(17, 18, true);   // right wheel, flipped so forward counts up A, B
 Encoder leftEnc(40, 39);          // left wheel
 
 // fixed-radius turn settings
@@ -24,8 +30,8 @@ const int TURN_INNER = TURN_SPEED * (TURN_RADIUS - TRACK_WIDTH / 2) / (TURN_RADI
 
 #define TEAM_TAG "BLUESCLUES:"
 
-#define MOTOR_1_PWM    1
-#define MOTOR_2_PWM    2
+#define MOTOR_1_PWM    1 //motor 1 is left motor
+#define MOTOR_2_PWM    2 //motor 2 is right motor
 #define MOTOR_1_DIR1   4
 #define MOTOR_1_DIR2   5
 #define MOTOR_2_DIR1   6
@@ -37,6 +43,19 @@ const int TURN_INNER = TURN_SPEED * (TURN_RADIUS - TRACK_WIDTH / 2) / (TURN_RADI
 
 #define ADC_PIN 9
 #define LED_EN  46
+
+// battery monitor: BMS net on the PCB, through a divider
+// TODO: set these to the actual resistors on the PCB before powering from the battery
+#define BMS_PIN        3
+#define BAT_R_TOP      300000.0f   // battery+ to pin, ohms
+#define BAT_R_BOTTOM   100000.0f   // pin to GND, ohms
+
+// motor supply: false = L293D motor supply comes from a 5 V regulator (no limit needed)
+//               true  = regulator bypassed, L293D gets the battery directly, so duty
+//                       is limited to keep the average motor voltage under MOTOR_MAX_V
+const bool MOTORS_ON_BATTERY = true;
+const float MOTOR_MAX_V = 6.0f;     // Pololu #1520: 4.5 V nominal, 3-6 V recommended
+const float L293_DROP_V = 2.0f;     // approximate voltage lost inside the L293D
 
 volatile bool buttonPressed = false;
 volatile unsigned long lastInterruptTime = 0;
@@ -76,7 +95,8 @@ Websocket webSocket(
     CLIENT_ID
 );
 
-Distance distance(ADC_PIN, LED_EN); 
+Distance distance(ADC_PIN, LED_EN);
+Battery battery(BMS_PIN, BAT_R_TOP, BAT_R_BOTTOM);
 
 void onWebSocketMessage(const String& message) {
     Serial.print("Received: ");
@@ -121,12 +141,72 @@ Drive drive(motors, leftEnc, rightEnc);
 
 Adafruit_NeoPixel rgb(NUM_LEDS, LED, NEO_GRB + NEO_KHZ800);
 
+Preferences prefs;
+float savedLeftMax = 0, savedRightMax = 0;
+
+// writes the learned speeds to flash, only if they moved more than 2% (saves flash wear)
+void saveLearnedSpeeds() {
+    float l = drive.leftMaxSpeed(), r = drive.rightMaxSpeed();
+    if (fabsf(l - savedLeftMax) < 0.02f * savedLeftMax &&
+        fabsf(r - savedRightMax) < 0.02f * savedRightMax) return;
+    prefs.putFloat("left", l);
+    prefs.putFloat("right", r);
+    savedLeftMax = l;
+    savedRightMax = r;
+    Serial.printf("Saved learned max speeds: L=%.0f R=%.0f\n", l, r);
+}
+
+// battery trip log in flash: read it over USB on the next boot, since opening the
+// serial monitor restarts the ESP32 and clears the blink
+void logBatteryTrip() {
+    prefs.putUInt("tripCount", prefs.getUInt("tripCount", 0) + 1);
+    prefs.putUChar("tripWhy", battery.tripReason());
+    prefs.putFloat("tripLive", battery.tripLive());
+    prefs.putFloat("tripRest", battery.tripRest());
+    Serial.printf("BATTERY EMPTY (%s): live=%.2f V rest=%.2f V\n",
+                  battery.tripReason() == Battery::UNDER_LOAD ? "sagged under load" : "resting voltage low",
+                  battery.tripLive(), battery.tripRest());
+}
+
+// lowest live voltage while driving, saved when it gets meaningfully lower
+void saveLowestSag() {
+    float lowest = battery.minLoaded();
+    if (lowest > 50.0f) return;   // hasn't driven on battery yet
+    if (lowest < prefs.getFloat("minLive", 99.0f) - 0.05f) prefs.putFloat("minLive", lowest);
+}
+
+void printBatteryLog() {
+    uint32_t n = prefs.getUInt("tripCount", 0);
+    float minLive = prefs.getFloat("minLive", 0);
+    if (n == 0) {
+        Serial.println("Battery log: no empty trips recorded");
+    } else {
+        Serial.printf("Battery log: %u empty trips. Last one: %s, live=%.2f V, rest before=%.2f V\n",
+                      n, prefs.getUChar("tripWhy", 0) == Battery::UNDER_LOAD ? "SAGGED UNDER LOAD" : "RESTING VOLTAGE LOW",
+                      prefs.getFloat("tripLive", 0), prefs.getFloat("tripRest", 0));
+    }
+    if (minLive > 0) Serial.printf("Battery log: lowest voltage seen while driving = %.2f V\n", minLive);
+}
+
 void setup() {
     distance.begin();
+    battery.begin();
+    // bench supply, breadboard resistors (redo with the PCB resistors):
+    // uncalibrated 8.82 V read vs 9.058 V meter, 7.18 V read vs 7.39 V meter
+    // both give meter/read = 1.028, so a plain gain fits, no offset needed
+    battery.setCalibration(1.028f);
     leftEnc.begin();
     rightEnc.begin();
 
     Serial.begin(115200);
+
+    // restore what the bot learned last time it drove (0 = nothing saved yet, keeps default)
+    prefs.begin("drive", false);
+    drive.setMaxSpeeds(prefs.getFloat("left", 0), prefs.getFloat("right", 0));
+    savedLeftMax = drive.leftMaxSpeed();
+    savedRightMax = drive.rightMaxSpeed();
+    Serial.printf("Loaded max speeds: L=%.0f R=%.0f\n", savedLeftMax, savedRightMax);
+    printBatteryLog();
     // setup(): replace the two webSocket lines
     if (!TIMED_TEST) {
         webSocket.onMessage(onWebSocketMessage);
@@ -159,6 +239,15 @@ void loop() {
 
     drive.update(); // every loop()
     distance.update();
+    battery.setLoaded(drive.leftTarget() != 0 || drive.rightTarget() != 0);   // motors running?
+    if (battery.update() && MOTORS_ON_BATTERY) {
+        // duty x (battery - L293D drop) = average motor voltage, so cap the duty to
+        // hit MOTOR_MAX_V. Fresh 9.5 V -> 80%; the cap rises to 100% as the battery drains.
+        // No battery reading (USB only): use the fresh-battery cap to be safe
+        float available = (battery.present() ? battery.voltage() : 9.6f) - L293_DROP_V;
+        drive.setMaxDuty(available > 0 ? 100.0f * MOTOR_MAX_V / available : 100.0f);
+    }
+    if (battery.takeTrip()) logBatteryTrip();
 
     if (!TIMED_TEST) webSocket.loop();
 
@@ -169,9 +258,20 @@ void loop() {
         currentState = static_cast<State>((currentState + 1) % NUM_STATES);
     }
 
-    if(distance.delta() > 0.350) {
+    if(DISTANCE_STOP && distance.delta() > 0.350) {
         currentState = STOP;
     }
+
+    // battery too low to keep the 5 V regulator working: stop and wait for a swap
+    if (battery.empty()) {
+        currentState = STOP;
+    }
+
+    static bool lowWarned = false;
+    if (battery.low() && !lowWarned) {
+        Serial.printf("BATTERY LOW: %.2f V at rest (%d%%), replace soon\n", battery.restVoltage(), battery.percent());
+    }
+    lowWarned = battery.low();
 
     // if (distance.update()) {
     //     // A new reading is ready
@@ -187,7 +287,13 @@ void loop() {
         // Serial.printf("L=%ld R=%ld  Lspd=%.0f Rspd=%.0f\n",
         //               (long)leftEnc.count(), (long)rightEnc.count(),
         //               drive.leftSpeed(), drive.rightSpeed());
-        Serial.printf("Distance recorded: %.3f\n", distance.delta());
+        // target vs measured speed (counts/s) and duty %; duty stuck at 100 = motors maxed out
+        Serial.printf("L tgt=%d spd=%.0f duty=%.0f | R tgt=%d spd=%.0f duty=%.0f | dist=%.3f | bat=%.2fV rest=%.2fV %d%% max=%.0f | learned L=%.0f R=%.0f\n",
+                      drive.leftTarget(), drive.leftSpeed(), drive.leftDuty(),
+                      drive.rightTarget(), drive.rightSpeed(), drive.rightDuty(),
+                      distance.delta(), battery.voltage(), battery.restVoltage(),
+                      battery.percent(), drive.maxDuty(),
+                      drive.leftMaxSpeed(), drive.rightMaxSpeed());
     }
 
     static State lastPrinted = NUM_STATES;   // impossible value, so the first pass prints
@@ -195,6 +301,10 @@ void loop() {
         lastPrinted = currentState;
         Serial.print("State ");
         Serial.println(currentState + 1);
+        if (currentState == STOP) {
+            saveLearnedSpeeds();
+            saveLowestSag();
+        }
     }
 
     if (TIMED_TEST) {
@@ -222,7 +332,7 @@ void loop() {
     case FORWARD:
         // e.g. red FORWARD
         // Serial.println("State 1");
-        drive.setWheelSpeeds(1000, 1000);      // was motors.moveForward(100, 100)
+        drive.setWheelSpeeds(1500, 1500);     // was motors.moveForward(100, 100)
         rgb.setPixelColor(0, rgb.Color(150, 0, 0));
         rgb.show();
         break;
@@ -230,7 +340,7 @@ void loop() {
     case BACKWARD:
         // e.g. orange BACKWARD
         // Serial.println("State 2");
-        drive.setWheelSpeeds(-1000, -1000);    // was motors.moveBackward(100, 100)
+        drive.setWheelSpeeds(-1500, -1500);   // was motors.moveBackward(100, 100)
         rgb.setPixelColor(0, rgb.Color(255, 60, 0));
         rgb.show();
         break;
@@ -278,6 +388,16 @@ void loop() {
     default:
         // shouldn't happen
         break;
+    }
+
+    // empty battery: blink red over the state color so it's obvious why the bot stopped
+    // FAST blink (100 ms) = battery sagged below 6 V while driving
+    // SLOW blink (500 ms) = resting voltage below 7.2 V
+    if (battery.empty()) {
+        unsigned long period = battery.tripReason() == Battery::UNDER_LOAD ? 100 : 500;
+        bool on = (millis() / period) % 2;
+        rgb.setPixelColor(0, on ? rgb.Color(255, 0, 0) : rgb.Color(0, 0, 0));
+        rgb.show();
     }
 
     // float v = analogReadMilliVolts(ADC_PIN);
