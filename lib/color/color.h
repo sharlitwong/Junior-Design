@@ -1,5 +1,4 @@
 #pragma once
-
 #include <Arduino.h>
 #include <Preferences.h>
 #include <stdlib.h> 
@@ -8,72 +7,70 @@
 class ColorSensor {
 public:
     enum Surface { RED, YELLOW, BLUE, BLACK};
-
-    ColorSensor(uint8_t adcPin, uint8_t redPin, uint8_t yellowPin, uint8_t bluePin)
-        : adcPin_(adcPin) {
+    
+    //Construction function
+    ColorSensor(uint8_t adcPin, uint8_t redPin, uint8_t yellowPin, uint8_t bluePin): adcPin_(adcPin) {
         ledPins_[0] = redPin;
         ledPins_[1] = yellowPin;
         ledPins_[2] = bluePin;
     }
 
+    //Setting up color sensor
     void begin() {
+        analogWriteFrequency(20000); 
         for (int i = 0; i < NUM_LEDS; i++) {
             pinMode(ledPins_[i], OUTPUT);
-            digitalWrite(ledPins_[i], LOW);
+            // analogWriteFrequency(ledPins_[i], 20000);   // NEW: fast PWM so the sensor sees a steady average
+            ledOff(i);
         }
         analogReadResolution(12);
         analogSetPinAttenuation(adcPin_, ADC_11db);   // idle voltage is ~3 V, 0 dB would clip
     }
 
+    //Update readings for each LED
     bool update() {
         allOff();
         delay(50);
         ambient = readVoltage();
         delay(50);
 
-        digitalWrite(ledPins_[0], HIGH);
+        ledOn(0);                      
         delay(50);
         red = readVoltage();
-        digitalWrite(ledPins_[0], LOW);
+        ledOff(0);                     
         delay(50);
 
-        digitalWrite(ledPins_[1], HIGH);
+        ledOn(1);                      
         delay(50);
         yellow = readVoltage();
-        digitalWrite(ledPins_[1], LOW);
+        ledOff(1);                    
         delay(50);
 
-        digitalWrite(ledPins_[2], HIGH);
+        ledOn(2);                    
         delay(50);
         blue = readVoltage();
-        digitalWrite(ledPins_[2], LOW);
+        ledOff(2);                     
         delay(50);
 
         return true;
     }
 
+    //Determine the surface color
+    //TODO: Test with chassis and sensor mounts
     Surface readSurface() {
-        float r = scaledRed();
-        float y = scaledYellow();
-        float b = scaledBlue();
+        float dr = deltaRed();
+        float dy = deltaYellow();
+        float db = deltaBlue();
 
-        // NEW: if nothing reflects much light, it's black
-        if (r < blackLevel && y < blackLevel && b < blackLevel) {
-            return BLACK;
-        }
+        // black: every LED's drop is small compared to the ambient level (works in any room)
+        if (max(dr, max(dy, db)) < 0.5f * max(ambient, 0.05f)) return BLACK;
 
-        // your original logic, now using the scaled values
-        if (r > y && r > b) {
-            return RED;
-        } else if (y > r && y > b) {
-            return YELLOW;
-        } else if (b > y && b > r) {
-            return BLUE;
-        } else {
-            return BLACK;
-        }
+        if (db > dr) return BLUE;             // blue LED dominates
+        if (dy > 0.75f * dr) return YELLOW;   // yellow nearly as strong as red
+        return RED;
     }
-
+    
+    //Calibrate the scale factor for each LED color
     void calibrateAll() {
         Serial.println("Put sensor on RED"); delay(5000);
         calibrate(RED);
@@ -90,39 +87,20 @@ public:
         Serial.println("Calibration done");
     }
 
-    // void setCalibration(float gr, float gy, float gb, float black) {
-    //     gainRed = gr;
-    //     gainYellow = gy;
-    //     gainBlue = gb;
-    //     blackLevel = black;
-    // }
+    //Set the scale factor for each LED color
+    void setCalibration(float gr, float gy, float gb, float black) {
+        gainRed = gr;
+        gainYellow = gy;
+        gainBlue = gb;
+        blackLevel = black;
+    }
 
-    // void saveCalibration() {
-    //     prefs_.begin("colorsensor", false);   // false = we are writing
-    //     prefs_.putFloat("gainRed", gainRed);
-    //     prefs_.putFloat("gainYellow", gainYellow);
-    //     prefs_.putFloat("gainBlue", gainBlue);
-    //     prefs_.putFloat("blackLevel", blackLevel);
-    //     prefs_.putBool("saved", true);        // marks that real values exist
-    //     prefs_.end();
-    //     Serial.println("Calibration saved");
-    // }
-
-    // NEW: loads saved values. Returns true if there were any, false if not
-    // bool loadCalibration() {
-    //     if (!prefs_.begin("colorsensor", true)) {   // true = read only
-    //         return false;
-    //     }
-    //     bool saved = prefs_.getBool("saved", false);
-    //     if (saved) {
-    //         gainRed    = prefs_.getFloat("gainRed", 1.0f);
-    //         gainYellow = prefs_.getFloat("gainYellow", 1.0f);
-    //         gainBlue   = prefs_.getFloat("gainBlue", 1.0f);
-    //         blackLevel = prefs_.getFloat("blackLevel", 0.1f);
-    //     }
-    //     prefs_.end();
-    //     return saved;
-    // }
+    // Set LED brightness (0-255) from main, so you can tune without editing the class
+    void setDuty(uint8_t r, uint8_t y, uint8_t b) {
+        duty_[0] = r;
+        duty_[1] = y;
+        duty_[2] = b;
+    }
 
     //For tuning purposes. Print out the calibration value
     void printCalibration() {
@@ -141,6 +119,14 @@ public:
         Serial.print("  blue: ");   Serial.println(scaledBlue(), 3);
     }
 
+    // Raw voltages with each LED on. Use this while tuning duty_
+    void printRaw() {
+        Serial.print("ambient: "); Serial.print(ambient, 3);
+        Serial.print("  red: ");    Serial.print(red, 3);
+        Serial.print("  yellow: "); Serial.print(yellow, 3);
+        Serial.print("  blue: ");   Serial.println(blue, 3);
+    }
+
 private:
     static constexpr int NUM_LEDS = 3;
     static constexpr int SAMPLES = 12;
@@ -150,9 +136,16 @@ private:
     float ambient = 0, red = 0, yellow = 0, blue = 0;
     Preferences prefs_; 
 
-    //TODO: Calibrate this thorugh testing
+    // NEW: LED brightness, 0-255. Red, yellow, blue. Start red/blue at ~10%
+    uint8_t duty_[NUM_LEDS] = {25, 255, 25};
+
+    //Calibration values
     float gainRed = 1.0f, gainYellow = 1.0f, gainBlue = 1.0f;
     float blackLevel = 0.1f;
+
+    // Set duty cycles for each LED
+    void ledOn(int i)  { analogWrite(ledPins_[i], duty_[i]); }
+    void ledOff(int i) { analogWrite(ledPins_[i], 0); }
 
     // averaged input voltage in volts
     float readVoltage() {
@@ -161,10 +154,12 @@ private:
         return sum / (float)SAMPLES / 1000.0f;
     }
 
+    //Turn all LEDs off
     void allOff() {
-        for (int i = 0; i < NUM_LEDS; i++) digitalWrite(ledPins_[i], LOW);
+        for (int i = 0; i < NUM_LEDS; i++) ledOff(i);  
     }
 
+    //Calculate the delta for each LED color
     float deltaRed()    const { return abs(ambient - red); }
     float deltaYellow() const { return abs(ambient - yellow); }
     float deltaBlue()   const { return abs(ambient - blue); }

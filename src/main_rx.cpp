@@ -127,12 +127,13 @@ void IRAM_ATTR handleButtonISR() { //Interrupt Service Routine for pushbutton
 }
 
 void setup() {
+    Serial.begin(115200);
     distance.begin();
     color1.begin();
     leftEnc.begin();
     rightEnc.begin();
 
-    Serial.begin(115200);
+    
     // setup(): replace the two webSocket lines
     if (!TIMED_TEST) {
         webSocket.onMessage(onWebSocketMessage);
@@ -151,36 +152,24 @@ void setup() {
 
     motors.begin();
 
-    //BUTTON PIN (for arduino state machine)
+    // BUTTON PIN (for arduino state machine)
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleButtonISR, FALLING); //GPIO pin, ISR, event
     rgb.begin();
 
-    color1.calibrateAll();
-    Serial.println("Calibration done");
-    color1.printCalibration(); 
-    // color1.saveCalibration();
-    
-    // color1.setCalibration(3.4103f, 20.0300f, 8.4800f, 0.0325f);
-    // while (!color1.loadCalibration()) {
-    //     Serial.println("No saved calibration, calibrating now");
-    //     color1.calibrateAll();
-    // } 
+    color1.setDuty(15,255,25);
 
-    // if (color1.loadCalibration()) {
-    //     Serial.println("Loaded saved calibration");
-    //     color1.printCalibration();
-    // }
-    // pinMode(BLINK1_R, OUTPUT);
-    // analogReadResolution(12);
-    // analogSetPinAttenuation(BLINK1_ADC, ADC_11db);
+/****************COLOR SENSOR TESTING*******************************************/
+    // color1.calibrateAll();
+    // Serial.println("Calibration done");
+    // color1.printCalibration(); 
+/*******************************************************************************/
 }
     
 void loop() {
     drive.update(); // every loop()
     distance.update();
     color1.update();
-    // digitalWrite(BLINK1_R, HIGH);
 
     if (!TIMED_TEST) webSocket.loop();
 
@@ -195,13 +184,15 @@ void loop() {
         currentState = STOP;
     }
 
-    // if (distance.update()) {
-    //     // A new reading is ready
-    //     Serial.printf("Distance delta: %.3f V\n", distance.delta());
-    // }
-
-    color1.printValues();
+    Serial.println("Raw Values:");
+    color1.printRaw();
     surface = color1.readSurface();
+
+    if (surface == color1.RED)         Serial.println("RED");
+    else if (surface == color1.YELLOW) Serial.println("YELLOW");
+    else if (surface == color1.BLUE)   Serial.println("BLUE");
+    else                        Serial.println("BLACK");
+
     delay(200);
 
     static unsigned long lastPrint = 0;
@@ -306,8 +297,8 @@ void loop() {
         break;
     }
 
-    // float v = analogReadMilliVolts(BLINK1_ADC);
-    // Serial.printf("V = %.3f\n", v);
-    // delay(100);
+    float v = analogReadMilliVolts(BLINK1_ADC);
+    Serial.printf("V = %.3f\n", v);
+    delay(100);
 }
 
