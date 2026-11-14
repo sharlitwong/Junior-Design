@@ -17,6 +17,9 @@ FOR RECEIVING WEBSOCKET STATES
 
 /************************PIN DEFINITIONS***************************************/
 #define TEAM_TAG "BLUESCLUES:"
+// partner team (Indigo) commands, the exact strings agreed in the shared doc
+#define PARTNER_FORWARD "bluesClues-forward"   // Indigo tells us: forward 5 s
+#define INDIGO_FORWARD  "indigo-forward"       // we tell Indigo: forward 5 s
 // battery monitor: BMS net on the PCB, through a divider
 // TODO: set these to the actual resistors on the PCB before powering from the battery
 #define BMS_PIN        3
@@ -63,6 +66,15 @@ Distance distance(ADC_PIN, LED_EN);
 // false = ignore the distance sensor (for testing movement while it isn't wired/aimed);
 // set back to true so the bot stops for obstacles
 const bool DISTANCE_STOP = false;
+
+// false = skip the color sensors in loop(). ColorSensor::update() blocks for 400 ms
+// (eight delay(50)s), so with both sensors loop() takes ~1 s and the websocket
+// handshake times out (5 s) before it can connect. Set true only for color testing
+// until update() is rewritten without delay().
+const bool COLOR_TEST = false;
+
+// false = turn off the 20x/s drive/battery status line, so websocket prints are easy to read
+const bool DRIVE_DEBUG = false;
 
 /****************************COLOR SENSORS*************************************/
 ColorSensor color1(BLINK1_ADC, BLINK1_R, BLINK1_G, BLINK1_B); 
@@ -127,6 +139,9 @@ enum State {
 // State currentState = TIMED_TEST ? STOP : FORWARD;
 State currentState = STOP;
 unsigned long stateStart = 0;   // millis() when the current state began
+// true only when BLINK was started by the TX start-demo button (BLUESCLUES:8),
+// so cycling into BLINK with the onboard button doesn't make Indigo move
+bool sendAfterBlink = false;
 
 void IRAM_ATTR handleButtonISR() { //Interrupt Service Routine for pushbutton
   unsigned long now = millis();
@@ -156,13 +171,20 @@ Websocket webSocket(
 );
 
 void onWebSocketMessage(const String& message) {
-    Serial.print("Received: ");
-    Serial.print(message);
+    Serial.print("[WS] received: ");
+    Serial.println(message);
 
-    if(webSocket.isAuthenticated()) {
+    if(!webSocket.isAuthenticated()) {
+        Serial.println("[WS]   ignored: not authenticated yet");
+        return;
+    }
+    {
         String echo = "\"echo\":\""; // "echo:":"
         int echo_ind = message.indexOf(echo); //where "echo":" starts in message
 
+        if(echo_ind < 0) {
+          Serial.println("[WS]   no \"echo\" field (server status message), ignored");
+        }
         if(echo_ind > 0) {
           int message_open = echo_ind + echo.length(); //opening quote of actual message
           int message_end = message.indexOf("\"", message_open);
@@ -170,13 +192,32 @@ void onWebSocketMessage(const String& message) {
           if(message_end > message_open) {
             String value = message.substring(message_open, message_end); //inclusive, uninclusive
             const int taglen = strlen(TEAM_TAG);
+            Serial.printf("[WS]   command: \"%s\"\n", value.c_str());
 
-            if(value.startsWith(TEAM_TAG) && value.length() == taglen + 1) {
+            if(value == PARTNER_FORWARD) {
+              // from the partner team: drive forward 5 s, then stop (FORWARD5 handles the timing)
+              Serial.println("Partner command: forward 5 s");
+              currentState = FORWARD5;
+            }
+            else if(value.startsWith(TEAM_TAG) && value.length() == taglen + 1) {
               char digit = value[taglen];
               if(digit >= '1' && digit <= '7') {
                 State selectedState = static_cast<State>(digit - '1');
+                Serial.printf("[WS]   -> state %c\n", digit);
                 currentState = selectedState;
               }
+              else if(digit == '8') {
+                // start demo: blink, then tell Indigo to go forward (sent at the end of BLINK)
+                Serial.println("Start demo: blink, then send indigo-forward");
+                currentState = BLINK;
+                sendAfterBlink = true;
+              }
+              else {
+                Serial.println("[WS]   unknown digit, ignored");
+              }
+            }
+            else {
+              Serial.println("[WS]   not for us, ignored");
             }
           }
         }
@@ -236,8 +277,10 @@ void setup() {
 void loop() {
     drive.update(); // every loop()
     distance.update();
-    color1.update();
-    color2.update();
+    if (COLOR_TEST) {
+        color1.update();
+        color2.update();
+    }
     battery.update();
     if (MOTORS_ON_BATTERY) {
         // duty x (battery - L293D drop) = average motor voltage, so cap the duty to
@@ -279,30 +322,32 @@ void loop() {
         currentState = STOP;
     }
 
-    Serial.println("Raw Values (color 1):");
-    color1.printRaw();
-    Serial.println("Raw Values (color 2):");
-    color2.printRaw();
-    
-    surface1 = color1.readSurface();
-    surface2 = color2.readSurface();
+    if (COLOR_TEST) {
+        Serial.println("Raw Values (color 1):");
+        color1.printRaw();
+        Serial.println("Raw Values (color 2):");
+        color2.printRaw();
 
-    Serial.println("Color 1 surface:");
-    if (surface1 == color1.RED)         Serial.println("RED");
-    else if (surface1 == color1.YELLOW) Serial.println("YELLOW");
-    else if (surface1 == color1.BLUE)   Serial.println("BLUE");
-    else                                Serial.println("BLACK");
+        surface1 = color1.readSurface();
+        surface2 = color2.readSurface();
 
-    Serial.println("Color 2 surface:");
-    if (surface2 == color2.RED)         Serial.println("RED");
-    else if (surface2 == color2.YELLOW) Serial.println("YELLOW");
-    else if (surface2 == color2.BLUE)   Serial.println("BLUE");
-    else                                Serial.println("BLACK");
-    
-    delay(200);
+        Serial.println("Color 1 surface:");
+        if (surface1 == color1.RED)         Serial.println("RED");
+        else if (surface1 == color1.YELLOW) Serial.println("YELLOW");
+        else if (surface1 == color1.BLUE)   Serial.println("BLUE");
+        else                                Serial.println("BLACK");
+
+        Serial.println("Color 2 surface:");
+        if (surface2 == color2.RED)         Serial.println("RED");
+        else if (surface2 == color2.YELLOW) Serial.println("YELLOW");
+        else if (surface2 == color2.BLUE)   Serial.println("BLUE");
+        else                                Serial.println("BLACK");
+
+        delay(200);
+    }
 
     static unsigned long lastPrint = 0;
-    if (millis() - lastPrint >= 50) {   // print 20x per second, not thousands
+    if (DRIVE_DEBUG && millis() - lastPrint >= 50) {   // print 20x per second, not thousands
         lastPrint = millis();
         //Serial.printf("A=%d B=%d\n", digitalRead(17), digitalRead(18));
         // Serial.printf("A=%d B=%d\n", digitalRead(39), digitalRead(40));   // prints B's value under "A"
@@ -325,6 +370,7 @@ void loop() {
         stateStart = millis();
         Serial.print("State ");
         Serial.println(currentState + 1);
+        if (currentState != BLINK) sendAfterBlink = false;   // blink was cut short, don't send
         if (currentState == STOP) {
             saveLearnedSpeeds();
         }
@@ -414,7 +460,15 @@ void loop() {
         bool on = ((millis() - stateStart) / 250) % 2 == 0;   // flips every 250 ms
         rgb.setPixelColor(0, on ? rgb.Color(150, 150, 150) : rgb.Color(0, 0, 0));
         rgb.show();
-        if (millis() - stateStart >= 1500) currentState = STOP;   // 3 blinks, then stop
+        if (millis() - stateStart >= 1500) {   // 3 blinks, then stop
+            if (sendAfterBlink) {
+                // demo step 3: Bot 1 tells Bot 2 (Indigo) to move forward 5 s
+                sendAfterBlink = false;
+                bool sent = webSocket.sendText(INDIGO_FORWARD);
+                Serial.println(sent ? "Sent indigo-forward" : "indigo-forward NOT sent (not authenticated)");
+            }
+            currentState = STOP;
+        }
         break;
     }
 

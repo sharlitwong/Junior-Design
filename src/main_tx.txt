@@ -27,8 +27,10 @@
 
 #define CW_BUTTON     4
 #define CCW_BUTTON    5
+#define PARTNER_TEST_BUTTON 39   // stands in for Indigo: sends their forward command
+#define START_DEMO_BUTTON   21   // partner demo: our bot blinks, then sends indigo-forward
 
-// digit sent after TEAM_TAG for each button (RX accepts '1'-'7')
+// digit sent after TEAM_TAG for each button (RX accepts '1'-'8')
 #define UP_COMMAND    '1'
 #define DOWN_COMMAND  '2'
 #define CW_COMMAND    '3'
@@ -36,6 +38,11 @@
 #define STOP_COMMAND  '5'
 #define TURN_RIGHT_COMMAND '6'
 #define TURN_LEFT_COMMAND '7'
+#define START_DEMO_COMMAND '8'   // RX blinks, then tells Indigo to move forward
+#define PARTNER_TEST_COMMAND 'P'   // marker only; loop() sends PARTNER_FORWARD instead of a tag
+
+// what Indigo sends us (exact string from the shared doc)
+#define PARTNER_FORWARD "bluesClues-forward"
 
 volatile char pendingCommand = 0;  // 0 = nothing to send, set by the ISRs
 volatile unsigned long lastInterruptTime = 0;
@@ -101,11 +108,25 @@ void IRAM_ATTR handleCWISR()  {
 void IRAM_ATTR handleCCWISR()  { 
     queueCommand(CCW_COMMAND); 
 }
+void IRAM_ATTR handlePartnerTestISR() { 
+    queueCommand(PARTNER_TEST_COMMAND); 
+}
+void IRAM_ATTR handleStartDemoISR() { 
+    queueCommand(START_DEMO_COMMAND); 
+}
 
 State currentState = FORWARD;
 
+// prints everything the server sends the TX. If the server relays our own commands
+// back, seeing them here confirms the server got them
+void onWebSocketMessage(const String& message) {
+    Serial.print("[WS] received: ");
+    Serial.println(message);
+}
+
 void setup() {
     Serial.begin(115200);
+    webSocket.onMessage(onWebSocketMessage);
     webSocket.begin();
 
     delay(1000);
@@ -124,6 +145,8 @@ void setup() {
     pinMode(STOP_BUTTON, INPUT_PULLUP);
     pinMode(CW_BUTTON, INPUT_PULLUP);
     pinMode(CCW_BUTTON, INPUT_PULLUP);
+    pinMode(PARTNER_TEST_BUTTON, INPUT_PULLUP);
+    pinMode(START_DEMO_BUTTON, INPUT_PULLUP);
 
     attachInterrupt(digitalPinToInterrupt(UP_BUTTON), handleUpISR, FALLING); //GPIO pin, ISR, event
     attachInterrupt(digitalPinToInterrupt(DOWN_BUTTON), handleDownISR, FALLING); //GPIO pin, ISR, event
@@ -132,6 +155,8 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(STOP_BUTTON), handleStopISR, FALLING);
     attachInterrupt(digitalPinToInterrupt(CW_BUTTON), handleCWISR, FALLING);
     attachInterrupt(digitalPinToInterrupt(CCW_BUTTON), handleCCWISR, FALLING);
+    attachInterrupt(digitalPinToInterrupt(PARTNER_TEST_BUTTON), handlePartnerTestISR, FALLING);
+    attachInterrupt(digitalPinToInterrupt(START_DEMO_BUTTON), handleStartDemoISR, FALLING);
 }
 
 void loop() {
@@ -142,10 +167,14 @@ void loop() {
         char command = pendingCommand;
         pendingCommand = 0;
 
-        String myMessage = String(TEAM_TAG) + command;
-        Serial.println(myMessage);
-        if (!webSocket.sendText(myMessage)) {
-            Serial.println("not sent (not authenticated)");
+        // the partner test button sends Indigo's exact command; every other button sends TEAM_TAG + digit
+        String myMessage = (command == PARTNER_TEST_COMMAND) ? String(PARTNER_FORWARD)
+                                                             : String(TEAM_TAG) + command;
+        Serial.printf("[WS] button -> sending \"%s\" ... ", myMessage.c_str());
+        if (webSocket.sendText(myMessage)) {
+            Serial.println("sent");
+        } else {
+            Serial.println(webSocket.isAuthenticated() ? "FAILED (send error)" : "NOT sent (not authenticated)");
         }
     }
 }

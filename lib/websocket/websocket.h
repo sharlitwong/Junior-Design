@@ -35,7 +35,17 @@ public:
         client_.enableHeartbeat(15000, 3000, 2);
     }
 
-    void loop() { client_.loop(); }
+    void loop() {
+        client_.loop();
+        // connection status every 5 s, so you can see if the board dropped off the server
+        if (millis() - lastStatus_ >= 5000) {
+            lastStatus_ = millis();
+            Serial.printf("[WS] status: wifi=%s connected=%s authenticated=%s\n",
+                          WiFi.status() == WL_CONNECTED ? "yes" : "NO",
+                          client_.isConnected() ? "yes" : "NO",
+                          authenticated_ ? "yes" : "NO");
+        }
+    }
 
     void onMessage(void (*callback)(const String&)) { messageCallback_ = callback; }
 
@@ -59,19 +69,19 @@ private:
 
     void handleEvent(WStype_t type, uint8_t* payload, size_t length) {
         if (type == WStype_CONNECTED) {
-            Serial.println("Connected to WebSocket server");
+            Serial.printf("[WS] connected to server, sending ID %s\n", clientId_);
             client_.sendTXT(clientId_);
             return;
         }
 
         if (type == WStype_DISCONNECTED) {
             authenticated_ = false;
-            Serial.println("Disconnected");
+            Serial.println("[WS] disconnected (retrying every 5 s)");
             return;
         }
 
         if (type == WStype_ERROR) {
-            Serial.println("WebSocket error");
+            Serial.println("[WS] error");
             return;
         }
 
@@ -85,12 +95,12 @@ private:
         if (message.indexOf("\"authenticated\"") >= 0 &&
             message.indexOf("\"ok\"") >= 0) {
             authenticated_ = true;
-            Serial.println("Client authenticated");
+            Serial.println("[WS] authenticated");
         }
 
         if (message.indexOf("\"error\"") >= 0) {
             authenticated_ = false;
-            Serial.println("Authentication failed");
+            Serial.println("[WS] authentication FAILED");
         }
 
         if (messageCallback_ != nullptr) messageCallback_(message);
@@ -105,4 +115,5 @@ private:
     WebSocketsClient client_;
     bool authenticated_ = false;
     void (*messageCallback_)(const String&) = nullptr;
+    unsigned long lastStatus_ = 0;
 };
