@@ -23,6 +23,19 @@ public:
         rightSettled_ = 0;
     }
 
+    // like setWheelSpeeds(), but for small continuous changes (e.g. steering): keeps the
+    // current duty so the speed loop keeps its correction. Restarts from the feedforward
+    // guess only when a wheel starts, stops or reverses.
+    void trackWheelSpeeds(int leftTarget, int rightTarget) {
+        bool restart = leftTarget == 0 || rightTarget == 0 ||
+                       leftTarget_ == 0 || rightTarget_ == 0 ||
+                       (leftTarget > 0) != (leftTarget_ > 0) ||
+                       (rightTarget > 0) != (rightTarget_ > 0);
+        if (restart) { setWheelSpeeds(leftTarget, rightTarget); return; }
+        leftTarget_ = leftTarget;
+        rightTarget_ = rightTarget;
+    }
+
     // learned speed at 100% duty for each wheel, counts/s. The starting guess in
     // setWheelSpeeds() uses these, so they decide how big the burst is on a state change
     float leftMaxSpeed() const { return leftMaxSpeed_; }

@@ -30,7 +30,7 @@
 #define PARTNER_TEST_BUTTON 39   // stands in for Indigo: sends their forward command
 #define START_DEMO_BUTTON   21   // partner demo: our bot blinks, then sends indigo-forward
 
-// digit sent after TEAM_TAG for each button (RX accepts '1'-'8')
+// digit sent after TEAM_TAG for each button (RX: '1'-'7' moves, '8' lane following, '9' start demo)
 #define UP_COMMAND    '1'
 #define DOWN_COMMAND  '2'
 #define CW_COMMAND    '3'
@@ -38,7 +38,7 @@
 #define STOP_COMMAND  '5'
 #define TURN_RIGHT_COMMAND '6'
 #define TURN_LEFT_COMMAND '7'
-#define START_DEMO_COMMAND '8'   // RX blinks, then tells Indigo to move forward
+#define START_DEMO_COMMAND '9'   // RX blinks, then tells Indigo to move forward
 #define PARTNER_TEST_COMMAND 'P'   // marker only; loop() sends PARTNER_FORWARD instead of a tag
 
 // what Indigo sends us (exact string from the shared doc)

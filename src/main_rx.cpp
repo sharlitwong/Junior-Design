@@ -4,12 +4,12 @@
 FOR RECEIVING WEBSOCKET STATES
 */
 #include <Adafruit_NeoPixel.h>
-// #include <pwm.h>
 #include <esp32_secrets.h>
 #include <websocket.h>
 #include <motor.h>
 #include <encoder.h>
 #include <drive.h>
+#include <lane.h>
 #include <distance.h>
 #include <color.h>
 #include <battery.h>
@@ -67,10 +67,11 @@ Distance distance(ADC_PIN, LED_EN);
 // set back to true so the bot stops for obstacles
 const bool DISTANCE_STOP = false;
 
-// false = skip the color sensors in loop(). ColorSensor::update() blocks for 400 ms
-// (eight delay(50)s), so with both sensors loop() takes ~1 s and the websocket
-// handshake times out (5 s) before it can connect. Set true only for color testing
-// until update() is rewritten without delay().
+// The color sensors are read only while lane following (FOLLOW_LANE), or always when
+// COLOR_TEST = true (also prints the surfaces). ColorSensor::update() blocks for 400 ms
+// (eight delay(50)s), so with both sensors loop() takes ~1 s: the websocket handshake
+// times out (5 s) and the connection can drop while they're being read.
+// TODO: rewrite update() without delay() so the sensors can run all the time.
 const bool COLOR_TEST = false;
 
 // false = turn off the 20x/s drive/battery status line, so websocket prints are easy to read
@@ -118,18 +119,22 @@ void saveLearnedSpeeds() {
     Serial.printf("Saved learned max speeds: L=%.0f R=%.0f\n", l, r);
 }
 
+/**************************LANE FOLLOWING**************************************/
+LaneFollower lane(drive);     
+
 /****************************STATE MACHINE*************************************/
 volatile bool buttonPressed = false;
 volatile unsigned long lastInterruptTime = 0;
 
 enum State {
-    FORWARD,
-    BACKWARD,
-    PIVOTCW,
-    PIVOTCCW,
-    STOP,
-    TURN_RIGHT,
-    TURN_LEFT,
+    FORWARD,        //1
+    BACKWARD,       //2
+    PIVOTCW,        //3
+    PIVOTCCW,       //4
+    STOP,           //5
+    TURN_RIGHT,     //6
+    TURN_LEFT,      //7
+    FOLLOW_LANE,    //8 //TODO: Since a new state is added, have to modify the button pressed and Websocket number of states
     BLINK,
     FORWARD5,
     NUM_STATES
@@ -139,7 +144,7 @@ enum State {
 // State currentState = TIMED_TEST ? STOP : FORWARD;
 State currentState = STOP;
 unsigned long stateStart = 0;   // millis() when the current state began
-// true only when BLINK was started by the TX start-demo button (BLUESCLUES:8),
+// true only when BLINK was started by the TX start-demo button (BLUESCLUES:9),
 // so cycling into BLINK with the onboard button doesn't make Indigo move
 bool sendAfterBlink = false;
 
@@ -201,12 +206,12 @@ void onWebSocketMessage(const String& message) {
             }
             else if(value.startsWith(TEAM_TAG) && value.length() == taglen + 1) {
               char digit = value[taglen];
-              if(digit >= '1' && digit <= '7') {
+              if(digit >= '1' && digit <= '8') { // '1'-'7' moves, '8' FOLLOW_LANE
                 State selectedState = static_cast<State>(digit - '1');
                 Serial.printf("[WS]   -> state %c\n", digit);
                 currentState = selectedState;
               }
-              else if(digit == '8') {
+              else if(digit == '9') {
                 // start demo: blink, then tell Indigo to go forward (sent at the end of BLINK)
                 Serial.println("Start demo: blink, then send indigo-forward");
                 currentState = BLINK;
@@ -274,12 +279,15 @@ void setup() {
     /**************************************************************************/
 }
     
+/************************************LOOP FUNCTION*****************************/
 void loop() {
     drive.update(); // every loop()
     distance.update();
-    if (COLOR_TEST) {
+    if (COLOR_TEST || currentState == FOLLOW_LANE) {
         color1.update();
         color2.update();
+        surface1 = color1.readSurface();
+        surface2 = color2.readSurface();
     }
     battery.update();
     if (MOTORS_ON_BATTERY) {
@@ -323,27 +331,24 @@ void loop() {
     }
 
     if (COLOR_TEST) {
+        /**********************COLOR SENSORS DEBUGGING PURPOSES********************
         Serial.println("Raw Values (color 1):");
         color1.printRaw();
         Serial.println("Raw Values (color 2):");
         color2.printRaw();
+        /**************************************************************************/
 
-        surface1 = color1.readSurface();
-        surface2 = color2.readSurface();
-
-        Serial.println("Color 1 surface:");
+        Serial.println("Color 1 surface:"); //For debugging purposes
         if (surface1 == color1.RED)         Serial.println("RED");
         else if (surface1 == color1.YELLOW) Serial.println("YELLOW");
         else if (surface1 == color1.BLUE)   Serial.println("BLUE");
         else                                Serial.println("BLACK");
 
-        Serial.println("Color 2 surface:");
+        Serial.println("Color 2 surface:"); //For debugging purposes
         if (surface2 == color2.RED)         Serial.println("RED");
         else if (surface2 == color2.YELLOW) Serial.println("YELLOW");
         else if (surface2 == color2.BLUE)   Serial.println("BLUE");
         else                                Serial.println("BLACK");
-
-        delay(200);
     }
 
     static unsigned long lastPrint = 0;
@@ -436,6 +441,7 @@ void loop() {
         rgb.setPixelColor(0, rgb.Color(0, 0, 150));
         drive.stop();
         rgb.show();
+        lane.reset();
         break;
 
     case TURN_LEFT:
@@ -455,7 +461,7 @@ void loop() {
         break;
 
     case BLINK: {
-        // white blink, State 8
+        // white blink, State 9 (start demo is BLUESCLUES:9)
         drive.stop();                                         // don't move while blinking
         bool on = ((millis() - stateStart) / 250) % 2 == 0;   // flips every 250 ms
         rgb.setPixelColor(0, on ? rgb.Color(150, 150, 150) : rgb.Color(0, 0, 0));
@@ -473,11 +479,17 @@ void loop() {
     }
 
     case FORWARD5:
-        // LED off, forward for 5 s, State 9
+        // LED off, forward for 5 s, State 10
         drive.setWheelSpeeds(1500, 1500);           // same speed as FORWARD
         rgb.setPixelColor(0, rgb.Color(0, 0, 0));   // LED off while driving
         rgb.show();
         if (millis() - stateStart >= 5000) currentState = STOP;   // 5 s, then stop
+        break;
+
+    case FOLLOW_LANE:
+        lane.update(surface1, surface2);
+        rgb.setPixelColor(0, rgb.Color(0, 150, 150));
+        rgb.show();
         break;
 
     default:
