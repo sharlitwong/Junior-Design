@@ -4,12 +4,12 @@
 FOR RECEIVING WEBSOCKET STATES
 */
 #include <Adafruit_NeoPixel.h>
-// #include <pwm.h>
 #include <esp32_secrets.h>
 #include <websocket.h>
 #include <motor.h>
 #include <encoder.h>
 #include <drive.h>
+#include <lane.h>
 #include <distance.h>
 #include <color.h>
 #include <battery.h>
@@ -106,6 +106,9 @@ void saveLearnedSpeeds() {
     Serial.printf("Saved learned max speeds: L=%.0f R=%.0f\n", l, r);
 }
 
+/**************************LANE FOLLOWING**************************************/
+LaneFollower lane(drive);     
+
 /****************************STATE MACHINE*************************************/
 volatile bool buttonPressed = false;
 volatile unsigned long lastInterruptTime = 0;
@@ -120,6 +123,7 @@ enum State {
     TURN_LEFT,
     BLINK,
     FORWARD5,
+    FOLLOW_LANE, //TODO: Since a new state is added, have to modify the button pressed and Websocket number of states
     NUM_STATES
 };
 
@@ -233,6 +237,7 @@ void setup() {
     /**************************************************************************/
 }
     
+/************************************LOOP FUNCTION*****************************/
 void loop() {
     drive.update(); // every loop()
     distance.update();
@@ -279,27 +284,29 @@ void loop() {
         currentState = STOP;
     }
 
+    /**********************COLOR SENSORS DEBUGGING PURPOSES********************
     Serial.println("Raw Values (color 1):");
     color1.printRaw();
     Serial.println("Raw Values (color 2):");
     color2.printRaw();
+    /**************************************************************************/
     
     surface1 = color1.readSurface();
     surface2 = color2.readSurface();
 
-    Serial.println("Color 1 surface:");
+    Serial.println("Color 1 surface:"); //For debugging purposes
     if (surface1 == color1.RED)         Serial.println("RED");
     else if (surface1 == color1.YELLOW) Serial.println("YELLOW");
     else if (surface1 == color1.BLUE)   Serial.println("BLUE");
     else                                Serial.println("BLACK");
 
-    Serial.println("Color 2 surface:");
+    Serial.println("Color 2 surface:"); //For debugging purposes
     if (surface2 == color2.RED)         Serial.println("RED");
     else if (surface2 == color2.YELLOW) Serial.println("YELLOW");
     else if (surface2 == color2.BLUE)   Serial.println("BLUE");
     else                                Serial.println("BLACK");
     
-    delay(200);
+    // delay(200);
 
     static unsigned long lastPrint = 0;
     if (millis() - lastPrint >= 50) {   // print 20x per second, not thousands
@@ -390,6 +397,7 @@ void loop() {
         rgb.setPixelColor(0, rgb.Color(0, 0, 150));
         drive.stop();
         rgb.show();
+        lane.reset();
         break;
 
     case TURN_LEFT:
@@ -425,6 +433,13 @@ void loop() {
         rgb.show();
         if (millis() - stateStart >= 5000) currentState = STOP;   // 5 s, then stop
         break;
+
+    case FOLLOW_LANE:
+        lane.update(surface1, surface2);
+        rgb.setPixelColor(0, rgb.Color(0, 150, 150));
+        rgb.show();
+        break;
+
 
     default:
         // shouldn't happen
