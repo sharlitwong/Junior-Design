@@ -114,16 +114,16 @@ volatile bool buttonPressed = false;
 volatile unsigned long lastInterruptTime = 0;
 
 enum State {
-    FORWARD,
-    BACKWARD,
-    PIVOTCW,
-    PIVOTCCW,
-    STOP,
-    TURN_RIGHT,
-    TURN_LEFT,
+    FORWARD,        //1
+    BACKWARD,       //2
+    PIVOTCW,        //3
+    PIVOTCCW,       //4
+    STOP,           //5
+    TURN_RIGHT,     //6
+    TURN_LEFT,      //7
+    FOLLOW_LANE,    //8 //TODO: Since a new state is added, have to modify the button pressed and Websocket number of states
     BLINK,
     FORWARD5,
-    FOLLOW_LANE, //TODO: Since a new state is added, have to modify the button pressed and Websocket number of states
     NUM_STATES
 };
 
@@ -177,7 +177,7 @@ void onWebSocketMessage(const String& message) {
 
             if(value.startsWith(TEAM_TAG) && value.length() == taglen + 1) {
               char digit = value[taglen];
-              if(digit >= '1' && digit <= '7') {
+              if(digit >= '1' && digit <= '8') { //MODIFIED digit <= '7' to digit <= '8'
                 State selectedState = static_cast<State>(digit - '1');
                 currentState = selectedState;
               }
@@ -439,7 +439,6 @@ void loop() {
         rgb.setPixelColor(0, rgb.Color(0, 150, 150));
         rgb.show();
         break;
-
 
     default:
         // shouldn't happen
