@@ -65,7 +65,7 @@ Battery battery(BMS_PIN, BAT_R_TOP, BAT_R_BOTTOM);
 Distance distance(ADC_PIN, LED_EN); 
 // false = ignore the distance sensor (for testing movement while it isn't wired/aimed);
 // set back to true so the bot stops for obstacles
-const bool DISTANCE_STOP = false;
+const bool DISTANCE_STOP = true;
 
 // The color sensors are read only while lane following (FOLLOW_LANE), or always when
 // COLOR_TEST = true (also prints the surfaces). ColorSensor::update() blocks for 400 ms
@@ -75,7 +75,7 @@ const bool DISTANCE_STOP = false;
 const bool COLOR_TEST = false;
 
 // false = turn off the 20x/s drive/battery status line, so websocket prints are easy to read
-const bool DRIVE_DEBUG = false;
+const bool DRIVE_DEBUG = true;
 
 /****************************COLOR SENSORS*************************************/
 ColorSensor color1(BLINK1_ADC, BLINK1_R, BLINK1_G, BLINK1_B); 
@@ -361,7 +361,8 @@ void loop() {
         //               (long)leftEnc.count(), (long)rightEnc.count(),
         //               drive.leftSpeed(), drive.rightSpeed());
         // target vs measured speed (counts/s) and duty %; duty stuck at 100 = motors maxed out
-        Serial.printf("L tgt=%d spd=%.0f duty=%.0f | R tgt=%d spd=%.0f duty=%.0f | dist=%.3f | bat=%.2fV %d%%%s max=%.0f | learned L=%.0f R=%.0f\n",
+        Serial.printf("ticks L=%ld R=%ld | L tgt=%d spd=%.0f duty=%.0f | R tgt=%d spd=%.0f duty=%.0f | dist=%.3f | bat=%.2fV %d%%%s max=%.0f | learned L=%.0f R=%.0f\n",
+                      (long)leftEnc.count(), (long)rightEnc.count(),
                       drive.leftTarget(), drive.leftSpeed(), drive.leftDuty(),
                       drive.rightTarget(), drive.rightSpeed(), drive.rightDuty(),
                       distance.delta(), battery.voltage(), battery.percent(),
@@ -408,7 +409,6 @@ void loop() {
         // Serial.println("State 1");
         drive.setWheelSpeeds(1500, 1500);     // was motors.moveForward(100, 100)
         rgb.setPixelColor(0, rgb.Color(150, 0, 0));
-        rgb.show();
         break;
 
     case BACKWARD:
@@ -416,7 +416,6 @@ void loop() {
         // Serial.println("State 2");
         drive.setWheelSpeeds(-1500, -1500);   // was motors.moveBackward(100, 100)
         rgb.setPixelColor(0, rgb.Color(255, 60, 0));
-        rgb.show();
         break;
 
     case PIVOTCW:
@@ -424,7 +423,6 @@ void loop() {
         // Serial.println("State 3");
         drive.setWheelSpeeds(800, -800);       // was motors.pivotCW(100)
         rgb.setPixelColor(0, rgb.Color(150, 60, 0));
-        rgb.show();
         break;
 
     case PIVOTCCW:
@@ -432,7 +430,6 @@ void loop() {
         // Serial.println("State 4");
         drive.setWheelSpeeds(-800, 800);       // was motors.pivotCCW(100)
         rgb.setPixelColor(0, rgb.Color(0, 150, 0));
-        rgb.show();
         break;
 
     case STOP:
@@ -440,7 +437,6 @@ void loop() {
         // Serial.println("State 5");
         rgb.setPixelColor(0, rgb.Color(0, 0, 150));
         drive.stop();
-        rgb.show();
         lane.reset();
         break;
 
@@ -449,7 +445,6 @@ void loop() {
         // Serial.println("State 6");
         drive.setWheelSpeeds(TURN_INNER, TURN_SPEED);   // left wheel on the inside of the curve
         rgb.setPixelColor(0, rgb.Color(100, 0, 150));
-        rgb.show();
         break;
 
     case TURN_RIGHT:
@@ -457,7 +452,6 @@ void loop() {
         // Serial.println("State 7");
         drive.setWheelSpeeds(TURN_SPEED, TURN_INNER);   // right wheel on the inside of the curve
         rgb.setPixelColor(0, rgb.Color(150, 150, 150));
-        rgb.show();
         break;
 
     case BLINK: {
@@ -465,7 +459,6 @@ void loop() {
         drive.stop();                                         // don't move while blinking
         bool on = ((millis() - stateStart) / 250) % 2 == 0;   // flips every 250 ms
         rgb.setPixelColor(0, on ? rgb.Color(150, 150, 150) : rgb.Color(0, 0, 0));
-        rgb.show();
         if (millis() - stateStart >= 1500) {   // 3 blinks, then stop
             if (sendAfterBlink) {
                 // demo step 3: Bot 1 tells Bot 2 (Indigo) to move forward 5 s
@@ -482,14 +475,12 @@ void loop() {
         // LED off, forward for 5 s, State 10
         drive.setWheelSpeeds(1500, 1500);           // same speed as FORWARD
         rgb.setPixelColor(0, rgb.Color(0, 0, 0));   // LED off while driving
-        rgb.show();
         if (millis() - stateStart >= 5000) currentState = STOP;   // 5 s, then stop
         break;
 
     case FOLLOW_LANE:
         lane.update(surface1, surface2);
         rgb.setPixelColor(0, rgb.Color(0, 150, 150));
-        rgb.show();
         break;
 
     default:
@@ -497,10 +488,10 @@ void loop() {
         break;
     }
 
-    // low battery: blink red over the state color
-    if (batteryLow) {
-        bool on = (millis() / 500) % 2;
-        rgb.setPixelColor(0, on ? rgb.Color(255, 0, 0) : rgb.Color(0, 0, 0));
-        rgb.show();
+    // low battery: the state color blinks (0.5 s on, 0.5 s off) instead of staying solid.
+    // The states above only set the color; the LED is drawn once here so nothing mixes
+    if (batteryLow && (millis() / 500) % 2) {
+        rgb.setPixelColor(0, rgb.Color(0, 0, 0));
     }
+    rgb.show();
 }
