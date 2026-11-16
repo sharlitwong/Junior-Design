@@ -27,46 +27,86 @@ public:
         analogSetPinAttenuation(adcPin_, ADC_11db);   // idle voltage is ~3 V, 0 dB would clip
     }
 
-    //Update readings for each LED
+    struct Thresholds {
+        float blueMin;      // fb above this -> BLUE
+        float blackMax;     // max(fr, fy) below this -> BLACK
+        float yellowRatio;  // dy > yellowRatio * dr -> YELLOW, else RED
+    };
+
+    void setThresholds(float blueMin, float blackMax, float yellowRatio) {
+        th_ = { blueMin, blackMax, yellowRatio };
+    }
+   
+    // Update readings for each LED (non-blocking, call every loop)
     bool update() {
-        allOff();
-        delay(50);
-        ambient = readVoltage();
-        delay(50);
-
-        ledOn(0);                      
-        delay(50);
-        red = readVoltage();
-        ledOff(0);                     
-        delay(50);
-
-        ledOn(1);                      
-        delay(50);
-        yellow = readVoltage();
-        ledOff(1);                    
-        delay(50);
-
-        ledOn(2);                    
-        delay(50);
-        blue = readVoltage();
-        ledOff(2);                     
-        delay(50);
-
-        return true;
+        switch (step_) {
+        case 0:                                   // start: all LEDs off, let ambient settle
+            allOff();
+            stepStart_ = millis();
+            step_ = 1;
+            break;
+        case 1:                                   // after 50 ms: read ambient, red LED on
+            if (millis() - stepStart_ >= SETTLE_MS) {
+                newAmbient_ = readVoltage();
+                allOff();
+                ledOn(0);
+                stepStart_ = millis();
+                step_ = 2;
+            }
+            break;
+        case 2:                                   // after 50 ms: read red, yellow LED on
+            if (millis() - stepStart_ >= SETTLE_MS) {
+                newRed_ = readVoltage();
+                allOff();
+                ledOn(1);
+                stepStart_ = millis();
+                step_ = 3;
+            }
+            break;
+        case 3:                                   // after 50 ms: read yellow, blue LED on
+            if (millis() - stepStart_ >= SETTLE_MS) {
+                newYellow_ = readVoltage();
+                allOff();
+                ledOn(2);
+                stepStart_ = millis();
+                step_ = 4;
+            }
+            break;
+        case 4:                                   // after 50 ms: read blue, publish all four
+            if (millis() - stepStart_ >= SETTLE_MS) {
+                newBlue_ = readVoltage();
+                allOff();
+                ambient = newAmbient_;            // copy together so readSurface() never
+                red     = newRed_;                // mixes old and new readings
+                yellow  = newYellow_;
+                blue    = newBlue_;
+                step_ = 0;
+                return true;                      // a full set of readings is ready
+            }
+            break;
+        }
+        return false;
     }
 
-    //Determine the surface color
-    //TODO: Test with chassis and sensor mounts
     Surface readSurface() {
+        float amb = max(ambient, 0.05f);
         float dr = deltaRed();
         float dy = deltaYellow();
         float db = deltaBlue();
 
-        // black: every LED's drop is small compared to the ambient level (works in any room)
-        if (max(dr, max(dy, db)) < 0.5f * max(ambient, 0.05f)) return BLACK;
+        float fr = dr / amb;   // fractional drops
+        float fy = dy / amb;
+        float fb = db / amb;
 
-        if (db > dr) return BLUE;             // blue LED dominates
-        if (dy > 0.75f * dr) return YELLOW;   // yellow nearly as strong as red
+        // blue: only a blue surface pulls the blue reading down by most of ambient
+        if (fb > th_.blueMin) return BLUE;
+
+        // black: red and yellow LEDs barely change the reading (blue channel leaks, so ignored)
+        if (max(fr, fy) < th_.blackMax) return BLACK;
+
+        // yellow reflects the yellow LED about as well as red; red reflects yellow poorly
+        if (dy > th_.yellowRatio * dr) return YELLOW;
+
         return RED;
     }
     
@@ -136,6 +176,13 @@ private:
     float ambient = 0, red = 0, yellow = 0, blue = 0;
     Preferences prefs_; 
 
+    Thresholds th_ = { 0.5f, 0.06f, 0.5f };
+
+    static constexpr unsigned long SETTLE_MS = 15;
+    uint8_t step_ = 0;                 // 0 = start, 1 = ambient, 2 = red, 3 = yellow, 4 = blue
+    unsigned long stepStart_ = 0;
+    float newAmbient_ = 0, newRed_ = 0, newYellow_ = 0, newBlue_ = 0;   // cycle in progress
+
     // NEW: LED brightness, 0-255. Red, yellow, blue. Start red/blue at ~10%
     uint8_t duty_[NUM_LEDS] = {25, 255, 25};
 
@@ -177,7 +224,9 @@ private:
 
         // blink all three LEDs CAL_ROUNDS times and add up the deltas
         for (int i = 0; i < CAL_ROUNDS; i++) {
-            update();
+            // update();
+            step_ = 0;                // restart the cycle
+            while (!update()) { }     // wait for one full fresh reading (blocking is fine here)
             sumRed    += deltaRed();
             sumYellow += deltaYellow();
             sumBlue   += deltaBlue();

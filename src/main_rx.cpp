@@ -65,7 +65,7 @@ Battery battery(BMS_PIN, BAT_R_TOP, BAT_R_BOTTOM);
 Distance distance(ADC_PIN, LED_EN); 
 // false = ignore the distance sensor (for testing movement while it isn't wired/aimed);
 // set back to true so the bot stops for obstacles
-const bool DISTANCE_STOP = false;
+const bool DISTANCE_STOP = true;
 
 // The color sensors are read only while lane following (FOLLOW_LANE), or always when
 // COLOR_TEST = true (also prints the surfaces). ColorSensor::update() blocks for 400 ms
@@ -122,6 +122,15 @@ void saveLearnedSpeeds() {
 /**************************LANE FOLLOWING**************************************/
 LaneFollower lane(drive);     
 
+const char* surfaceName(ColorSensor::Surface s) {
+    switch (s) {
+        case ColorSensor::RED:    return "RED";
+        case ColorSensor::YELLOW: return "YELLOW";
+        case ColorSensor::BLUE:   return "BLUE";
+        default:                  return "BLACK";
+    }
+}
+
 /****************************STATE MACHINE*************************************/
 volatile bool buttonPressed = false;
 volatile unsigned long lastInterruptTime = 0;
@@ -142,7 +151,8 @@ enum State {
 
 // State currentState = FORWARD;
 // State currentState = TIMED_TEST ? STOP : FORWARD;
-State currentState = STOP;
+// State currentState = STOP;
+State currentState = FOLLOW_LANE;   // was: State currentState = STOP;
 unsigned long stateStart = 0;   // millis() when the current state began
 // true only when BLINK was started by the TX start-demo button (BLUESCLUES:9),
 // so cycling into BLINK with the onboard button doesn't make Indigo move
@@ -269,14 +279,10 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleButtonISR, FALLING); //GPIO pin, ISR, event
     rgb.begin();
 
-    color1.setDuty(15,255,25);
-    color2.setDuty(15,255,25);
-
-    /**************COLOR SENSOR TESTING****************************************/
-    // color1.calibrateAll();
-    // Serial.println("Calibration done");
-    // color1.printCalibration(); 
-    /**************************************************************************/
+    color1.setDuty(105,255,10);
+    color2.setDuty(10,255,25);
+    color1.setThresholds(0.5f, 0.06f, 0.5f);
+    color2.setThresholds(0.5f, 0.20f, 0.5f);
 }
     
 /************************************LOOP FUNCTION*****************************/
@@ -288,6 +294,13 @@ void loop() {
         color2.update();
         surface1 = color1.readSurface();
         surface2 = color2.readSurface();
+
+        static ColorSensor::Surface p1 = ColorSensor::BLACK, p2 = ColorSensor::BLACK;
+        if (!COLOR_TEST && (surface1 != p1 || surface2 != p2)) {   // print only on change
+            Serial.printf("S1=%s S2=%s\n", surfaceName(surface1), surfaceName(surface2));
+            p1 = surface1;
+            p2 = surface2;
+        }
     }
     battery.update();
     if (MOTORS_ON_BATTERY) {
@@ -331,12 +344,12 @@ void loop() {
     }
 
     if (COLOR_TEST) {
-        /**********************COLOR SENSORS DEBUGGING PURPOSES********************
+        /**********************COLOR SENSORS DEBUGGING PURPOSES****************/
         Serial.println("Raw Values (color 1):");
         color1.printRaw();
         Serial.println("Raw Values (color 2):");
         color2.printRaw();
-        /**************************************************************************/
+        /**********************************************************************/
 
         Serial.println("Color 1 surface:"); //For debugging purposes
         if (surface1 == color1.RED)         Serial.println("RED");
@@ -350,6 +363,8 @@ void loop() {
         else if (surface2 == color2.BLUE)   Serial.println("BLUE");
         else                                Serial.println("BLACK");
     }
+
+    if (COLOR_TEST) delay(150);   // was: delay(100);
 
     static unsigned long lastPrint = 0;
     if (DRIVE_DEBUG && millis() - lastPrint >= 50) {   // print 20x per second, not thousands

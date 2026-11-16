@@ -19,11 +19,9 @@ private:
     unsigned long lastUpdateMs_ = 0;
     float steer_ = 0;        // + = steering right, - = left (counts/s)
 
-    static const int BASE_SPEED = 1000;   // counts/s
-    // static const int STEER      = 250;    // counts/s added to one wheel, removed from the other
-    // static const int PIVOT_SPEED = 600;  // counts/s added per wheel
-    static const int MAX_STEER  = 900;                  // counts/s; > BASE_SPEED lets the inner wheel reverse (pivot-like)
-    static constexpr float STEER_RATE  = 1500.0f;       // counts/s per second the steer builds while off-center
-    static constexpr float STEER_DECAY = 3000.0f;       // counts/s per second it relaxes when centered
-    static const unsigned long LOST_MS = 1500;  // both black for this long = forget the lane
+    static const int BASE_SPEED = 1000;
+    static const int MIN_STEER  = 200;                  // ~0.2 x BASE_SPEED
+    static const int MAX_STEER  = 600;                  // ~0.6 x BASE_SPEED
+    static constexpr float STEER_RATE = 1100.0f;        // ~1.1 x BASE_SPEED
+    static const unsigned long LOST_MS = 300;      
 };
